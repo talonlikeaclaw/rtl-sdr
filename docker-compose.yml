@@ -1,0 +1,54 @@
+name: sdr
+
+services:
+  readsb:
+    profiles: [adsb]
+    # Upstream image lacks RTL-SDR Blog V4L support; see readsb-v4l/Dockerfile.
+    build: ./readsb-v4l
+    image: sdr/readsb-v4l:latest
+    container_name: readsb
+    restart: unless-stopped
+    devices:
+      - /dev/bus/usb:/dev/bus/usb
+    tmpfs:
+      - /run/readsb:size=64M
+      - /var/log:size=32M
+    volumes:
+      - readsb_rrd:/run/collectd
+      - readsb_autogain:/run/autogain
+    ports:
+      - "30005:30005"
+    environment:
+      TZ: ${TZ}
+      READSB_DEVICE_TYPE: rtlsdr
+      READSB_ENABLE_BIASTEE: "on"
+      READSB_DCFILTER: "true"
+      READSB_FIX: "true"
+      READSB_GAIN: autogain
+      READSB_LAT: ${READSB_LAT}
+      READSB_LON: ${READSB_LON}
+      READSB_MAX_RANGE: "600"
+      READSB_MODEAC: "true"
+      READSB_RX_LOCATION_ACCURACY: "2"
+      READSB_STATS_RANGE: "true"
+      READSB_NET_ENABLE: "true"
+
+  tar1090:
+    profiles: [adsb]
+    image: ghcr.io/sdr-enthusiasts/docker-tar1090:latest
+    container_name: tar1090
+    restart: unless-stopped
+    depends_on: [readsb]
+    tmpfs:
+      - /run:exec,size=256M
+    ports:
+      - "8080:80"
+    environment:
+      TZ: ${TZ}
+      BEASTHOST: readsb
+      LAT: ${READSB_LAT}
+      LONG: ${READSB_LON}
+
+volumes:
+  readsb_rrd:
+  readsb_autogain:
