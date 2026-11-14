@@ -1,0 +1,406 @@
+/* plane-stats — glassmorphism UI
+   Frosted panels over a restrained, aviation-instrument backdrop. */
+
+:root {
+  color-scheme: dark;
+  --text: #e8edf4;
+  --muted: rgba(203, 213, 225, 0.6);
+  --faint: rgba(148, 163, 184, 0.5);
+  --stroke: rgba(255, 255, 255, 0.09);
+  --glass-top: rgba(255, 255, 255, 0.055);
+  --glass-bottom: rgba(255, 255, 255, 0.018);
+  --shadow: 0 18px 44px -26px rgba(0, 0, 0, 0.85);
+  --radius: 16px;
+  --accent: #9ec5e8;
+  --accent-dim: rgba(158, 197, 232, 0.55);
+  --live: #6ee7b7;
+}
+
+* { box-sizing: border-box; }
+
+html { -webkit-text-size-adjust: 100%; }
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  padding: clamp(1.25rem, 4vw, 2.75rem) clamp(1rem, 4vw, 2.5rem) 4rem;
+  font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  color: var(--text);
+  background:
+    radial-gradient(900px 600px at 50% -12%, rgba(96, 165, 250, 0.1), transparent 62%),
+    radial-gradient(760px 520px at 88% 108%, rgba(45, 212, 191, 0.05), transparent 62%),
+    linear-gradient(180deg, #070a0f 0%, #080b11 55%, #06080c 100%);
+  overflow-x: hidden;
+}
+
+/* Faint instrument grid, faded at the edges. */
+body::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  background-image:
+    linear-gradient(rgba(255, 255, 255, 0.028) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255, 255, 255, 0.028) 1px, transparent 1px);
+  background-size: 72px 72px;
+  -webkit-mask-image: radial-gradient(ellipse 85% 65% at 50% 0%, #000 15%, transparent 75%);
+  mask-image: radial-gradient(ellipse 85% 65% at 50% 0%, #000 15%, transparent 75%);
+}
+
+/* Ambient light, kept low so the panels stay the focus. */
+.bg {
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  overflow: hidden;
+}
+
+.orb {
+  position: absolute;
+  border-radius: 50%;
+  opacity: 0.35;
+  will-change: transform;
+  animation: drift 34s ease-in-out infinite alternate;
+}
+
+.orb-a {
+  width: 54vw;
+  height: 54vw;
+  min-width: 380px;
+  min-height: 380px;
+  top: -20vw;
+  left: -14vw;
+  background: radial-gradient(circle at 45% 45%, rgba(96, 165, 250, 0.22), rgba(59, 130, 246, 0.06) 44%, transparent 68%);
+}
+
+.orb-b {
+  width: 44vw;
+  height: 44vw;
+  min-width: 320px;
+  min-height: 320px;
+  top: 22vh;
+  right: -16vw;
+  background: radial-gradient(circle at 50% 50%, rgba(148, 163, 184, 0.16), rgba(100, 116, 139, 0.05) 44%, transparent 68%);
+  animation-delay: -12s;
+}
+
+.orb-c {
+  width: 50vw;
+  height: 50vw;
+  min-width: 340px;
+  min-height: 340px;
+  bottom: -26vw;
+  left: 24vw;
+  background: radial-gradient(circle at 50% 50%, rgba(45, 212, 191, 0.1), rgba(15, 118, 110, 0.03) 44%, transparent 68%);
+  animation-delay: -22s;
+}
+
+@keyframes drift {
+  from { transform: translate3d(0, 0, 0) scale(1); }
+  to { transform: translate3d(2vw, 3vh, 0) scale(1.05); }
+}
+
+/* Layout ------------------------------------------------------------- */
+
+.shell {
+  position: relative;
+  z-index: 1;
+  max-width: 1160px;
+  margin: 0 auto;
+}
+
+.hero {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem 2rem;
+  margin-bottom: clamp(1.5rem, 3vw, 2.25rem);
+  padding: 0 0.25rem 1.25rem;
+  /* Runway centerline: dashed white markings on the dark surface. */
+  border-bottom: 1px dashed rgba(255, 255, 255, 0.14);
+}
+
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 0.85rem;
+}
+
+.mark {
+  display: grid;
+  place-items: center;
+  width: 2.6rem;
+  height: 2.6rem;
+  border-radius: 12px;
+  color: var(--accent);
+  background: linear-gradient(150deg, rgba(255, 255, 255, 0.1), rgba(255, 255, 255, 0.025));
+  border: 1px solid var(--stroke);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.16);
+  backdrop-filter: blur(12px) saturate(130%);
+  -webkit-backdrop-filter: blur(12px) saturate(130%);
+}
+
+.mark svg { width: 1.35rem; height: 1.35rem; }
+
+h1 {
+  margin: 0;
+  font-size: clamp(1.35rem, 3vw, 1.7rem);
+  font-weight: 600;
+  letter-spacing: -0.015em;
+  line-height: 1.1;
+}
+
+.tagline {
+  margin: 0.25rem 0 0;
+  font-size: 0.8rem;
+  color: var(--muted);
+}
+
+.meta {
+  margin-left: 0.55rem;
+  padding-left: 0.6rem;
+  border-left: 1px solid rgba(255, 255, 255, 0.1);
+  font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  font-size: 0.7rem;
+  letter-spacing: 0.06em;
+  color: var(--faint);
+  white-space: nowrap;
+}
+
+.pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.4rem 0.8rem;
+  font-size: 0.72rem;
+  font-weight: 500;
+  letter-spacing: 0.04em;
+  color: var(--muted);
+  border-radius: 999px;
+  border: 1px solid var(--stroke);
+  background: linear-gradient(160deg, var(--glass-top), var(--glass-bottom));
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.1);
+  backdrop-filter: blur(14px) saturate(130%);
+  -webkit-backdrop-filter: blur(14px) saturate(130%);
+}
+
+/* Mini waveform: signal bars pulsing like an RF level meter. */
+.wave {
+  display: inline-flex;
+  align-items: flex-end;
+  gap: 2px;
+  height: 0.85rem;
+}
+
+.wave span {
+  width: 2.5px;
+  height: 100%;
+  border-radius: 1px;
+  background: var(--live);
+  transform-origin: bottom;
+  animation: wave 1.3s ease-in-out infinite;
+}
+
+.wave span:nth-child(1) { animation-delay: -0.9s; }
+.wave span:nth-child(2) { animation-delay: -0.5s; }
+.wave span:nth-child(3) { animation-delay: -0.15s; }
+.wave span:nth-child(4) { animation-delay: -0.65s; }
+
+@keyframes wave {
+  0%, 100% { transform: scaleY(0.3); opacity: 0.55; }
+  50% { transform: scaleY(1); opacity: 1; }
+}
+
+/* Glass surfaces ----------------------------------------------------- */
+
+.glass {
+  position: relative;
+  border-radius: var(--radius);
+  border: 1px solid var(--stroke);
+  background: linear-gradient(160deg, var(--glass-top), var(--glass-bottom));
+  box-shadow: var(--shadow), inset 0 1px 0 rgba(255, 255, 255, 0.1);
+  backdrop-filter: blur(20px) saturate(135%);
+  -webkit-backdrop-filter: blur(20px) saturate(135%);
+  /* Instrument bezel: a faint outer ring, like a cockpit gauge face. */
+  outline: 1px solid rgba(255, 255, 255, 0.035);
+  outline-offset: 5px;
+}
+
+/* Bright hairline along the top edge = glass highlight. */
+.glass::after {
+  content: "";
+  position: absolute;
+  inset: 0 18% auto;
+  height: 1px;
+  border-radius: 999px;
+  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.32), transparent);
+  opacity: 0.6;
+  pointer-events: none;
+}
+
+.panel {
+  padding: 1.2rem 1.35rem 1.35rem;
+  margin-bottom: 1.25rem;
+}
+
+.panel > h2 {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+  margin: 0 0 0.9rem;
+  font-size: 0.72rem;
+  font-weight: 600;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--faint);
+}
+
+.panel > h2::before {
+  content: "";
+  width: 2px;
+  height: 0.85rem;
+  border-radius: 999px;
+  background: var(--accent-dim);
+}
+
+/* Stat cards --------------------------------------------------------- */
+
+.cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(10.5rem, 1fr));
+  gap: 0.75rem;
+  margin: 0 0 1.25rem;
+}
+
+.card {
+  position: relative;
+  padding: 1rem 1.1rem 1.05rem;
+  border-radius: 13px;
+  border: 1px solid rgba(255, 255, 255, 0.075);
+  background: linear-gradient(160deg, rgba(255, 255, 255, 0.06), rgba(255, 255, 255, 0.015));
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.11);
+  backdrop-filter: blur(16px) saturate(130%);
+  -webkit-backdrop-filter: blur(16px) saturate(130%);
+}
+
+/* Hairline accent tick, like a panel edge marker. */
+.card::before {
+  content: "";
+  position: absolute;
+  top: 0.9rem;
+  left: 0;
+  width: 2px;
+  height: 0.7rem;
+  border-radius: 0 2px 2px 0;
+  background: var(--accent-dim);
+  opacity: 0.8;
+  pointer-events: none;
+}
+
+.card .num {
+  font-size: clamp(1.4rem, 2.4vw, 1.7rem);
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.15;
+  color: #f1f5f9;
+}
+
+.card .sub {
+  margin-top: 0.3rem;
+  font-size: 0.66rem;
+  font-weight: 500;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--faint);
+}
+
+/* Tables ------------------------------------------------------------- */
+
+.table-wrap {
+  overflow-x: auto;
+  border-radius: 10px;
+  border: 1px solid rgba(255, 255, 255, 0.05);
+  background: rgba(6, 10, 16, 0.32);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04);
+}
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.84rem;
+  font-variant-numeric: tabular-nums;
+}
+
+th, td {
+  padding: 0.5rem 0.8rem;
+  text-align: left;
+  white-space: nowrap;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.045);
+}
+
+th {
+  font-size: 0.66rem;
+  font-weight: 600;
+  letter-spacing: 0.11em;
+  text-transform: uppercase;
+  color: var(--faint);
+  background: rgba(255, 255, 255, 0.025);
+  user-select: none;
+}
+
+th[hx-get] { cursor: pointer; transition: color 0.2s ease, background 0.2s ease; }
+
+th[hx-get]:hover { color: var(--text); background: rgba(255, 255, 255, 0.05); }
+
+th.active { color: var(--accent); }
+th.active.desc::after { content: " ▾"; font-size: 0.75em; }
+th.active.asc::after { content: " ▴"; font-size: 0.75em; }
+
+tbody tr { transition: background 0.15s ease; }
+
+tbody tr:hover { background: rgba(255, 255, 255, 0.035); }
+
+tbody tr:last-child td { border-bottom: 0; }
+
+td { color: rgba(232, 237, 244, 0.85); }
+
+td:first-child {
+  font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  font-size: 0.78rem;
+  color: var(--accent-dim);
+}
+
+/* Footer ------------------------------------------------------------- */
+
+footer {
+  margin-top: 2.25rem;
+  text-align: center;
+  font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  font-size: 0.68rem;
+  letter-spacing: 0.08em;
+  color: rgba(148, 163, 184, 0.4);
+}
+
+/* Responsive / a11y -------------------------------------------------- */
+
+@media (max-width: 640px) {
+  .glass, .card, .pill, .mark {
+    backdrop-filter: blur(14px) saturate(125%);
+    -webkit-backdrop-filter: blur(14px) saturate(125%);
+  }
+  .panel { padding: 1rem 0.9rem 1.1rem; }
+  .cards { grid-template-columns: repeat(auto-fit, minmax(9rem, 1fr)); }
+  .meta { display: none; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+  }
+}

@@ -49,6 +49,21 @@ services:
       LAT: ${READSB_LAT}
       LONG: ${READSB_LON}
 
+  plane-stats:
+    profiles: [adsb]
+    build: ./plane-stats
+    image: sdr/plane-stats:latest
+    container_name: plane-stats
+    restart: unless-stopped
+    depends_on: [tar1090]
+    volumes:
+      - plane_stats_db:/data
+    ports:
+      - "8081:8081"
+    environment:
+      TZ: ${TZ}
+
 volumes:
   readsb_rrd:
   readsb_autogain:
+  plane_stats_db:

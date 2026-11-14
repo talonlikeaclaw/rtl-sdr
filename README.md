@@ -1,38 +1,37 @@
 # rtl-sdr
 
-## sdr-compose-stack
+ADS-B and friends on a Pi 4 with one RTL-SDR Blog V4L dongle. Docker Compose
+profiles, one radio app at a time (single dongle, single tuner).
 
-Docker Compose profiles for radio apps on a single RTL-SDR Blog V4L (Lite) dongle on a Pi 4. One dongle means one SDR app at a time: each app lives behind its own compose profile, and only one profile is ever up.
-
-## Usage
+## Run it
 
 ```bash
-docker compose --profile adsb up -d      # start the ADS-B receiver
-docker compose --profile adsb down       # tear it down
+docker compose --profile adsb up -d     # start ADS-B
+docker compose --profile adsb down      # stop
 ```
 
-Switching apps = tear down the current profile, then up the next one's profile.
+Map: `http://<pi-ip>:8080` — feed stats on port 30005 (Beast).
+Switching apps = down the current profile, up the next one's.
 
-## Dongle driver
+## The dongle quirk (read this before debugging "no planes")
 
-The dongle is an RTL-SDR Blog V4L. Its RF input switch is only configured by the
-RTL-SDR Blog librtlsdr fork; the upstream image ships an older librtlsdr that
-does not recognise `Blog V4L` and leaves the tuner on the wrong input (no 1090
-MHz signal). `readsb` therefore builds `readsb-v4l/Dockerfile`, which installs
-the blog fork over the image's library. Startup logs should show:
+The V4L's RF input switch is only set by the RTL-SDR Blog librtlsdr fork.
+The stock readsb image ships an older librtlsdr that doesn't know the V4L,
+so the tuner sits on the wrong input and 1090 MHz looks dead. `readsb-v4l/`
+builds the fork over the image's library. If the map is empty, check
+`docker logs readsb` for:
 
 ```
 RTL-SDR Blog V4 Lite Detected
 ```
 
-Rebuild after changing the Dockerfile with `docker compose --profile adsb build readsb`.
+Rebuild after touching the Dockerfile: `docker compose --profile adsb build readsb`.
 
-## Active services
+## What's running
 
-| Profile | Services | What you get |
+| Profile | Services | Ports |
 |---|---|---|
-| `adsb` | readsb | ADS-B decoder; Beast output on host port 30005 |
-| | tar1090 | Web map at `http://<pi-ip>:8080` |
+| `adsb` | readsb, tar1090, plane-stats (see AGENTS.md) | 8080 (map), 30005 (Beast), 8081 (stats) |
 
 ## Roadmap
 
