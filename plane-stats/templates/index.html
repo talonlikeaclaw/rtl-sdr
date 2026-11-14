@@ -40,8 +40,12 @@
 
       <section class="glass panel" aria-label="All-time fleet">
         <h2>All-time fleet</h2>
+        <input id="fleet-search" class="search" type="search" name="q" value="{{ q }}"
+               placeholder="Search hex, callsign, registration, type, owner, operator…"
+               hx-get="/partials/table" hx-trigger="input changed delay:400ms, search"
+               hx-target="#fleet" hx-include="this" aria-label="Search fleet">
         <div class="table-wrap">
-          <div id="fleet" hx-get="/partials/table" hx-trigger="every 10s">
+          <div id="fleet" hx-get="/partials/table" hx-trigger="every 10s" hx-include="#fleet-search">
             {% include "partials/table.html" %}
           </div>
         </div>
@@ -60,6 +64,15 @@
               {% endfor %}
             </tbody>
           </table>
+        </div>
+      </section>
+
+      <section class="glass panel" aria-label="Emergency log">
+        <h2>Emergency log</h2>
+        <div class="table-wrap">
+          <div id="emergencies" hx-get="/partials/emergencies" hx-trigger="every 30s">
+            {% include "partials/emergencies.html" %}
+          </div>
         </div>
       </section>
     </main>

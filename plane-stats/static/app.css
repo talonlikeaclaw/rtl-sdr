@@ -14,6 +14,7 @@
   --accent: #9ec5e8;
   --accent-dim: rgba(158, 197, 232, 0.55);
   --live: #6ee7b7;
+  --warning: #fbbf24;
 }
 
 * { box-sizing: border-box; }
@@ -318,6 +319,31 @@ h1 {
   color: var(--faint);
 }
 
+.card .num .unit {
+  font-size: 0.6em;
+  font-weight: 500;
+  letter-spacing: 0.02em;
+  color: var(--muted);
+}
+
+.card .who {
+  margin-top: 0.4rem;
+  font-size: 0.72rem;
+  color: var(--muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.card .who a {
+  color: var(--accent);
+  text-decoration: none;
+}
+
+.card .who a:hover {
+  text-decoration: underline;
+}
+
 /* Tables ------------------------------------------------------------- */
 
 .table-wrap {
@@ -376,6 +402,8 @@ td:first-child {
 
 /* Footer ------------------------------------------------------------- */
 
+.emergency { color: var(--warning); font-weight: 600; }
+
 footer {
   margin-top: 2.25rem;
   text-align: center;
@@ -404,3 +432,20 @@ footer {
     transition-duration: 0.001ms !important;
   }
 }
+
+/* Fleet search box */
+input.search {
+  width: 100%;
+  margin: 0.6rem 0 0.9rem;
+  padding: 0.55rem 0.9rem;
+  font-size: 0.85rem;
+  color: inherit;
+  background: linear-gradient(160deg, var(--glass-top), var(--glass-bottom));
+  border: 1px solid var(--stroke);
+  border-radius: 10px;
+  outline: none;
+  backdrop-filter: blur(14px) saturate(130%);
+  -webkit-backdrop-filter: blur(14px) saturate(130%);
+}
+input.search::placeholder { color: var(--muted); }
+input.search:focus { border-color: var(--accent-dim); }

@@ -2,36 +2,48 @@
   <thead>
     <tr>
       <th class="{% if sort == "hex" %}active {{ dir }}{% endif %}"
-          hx-get="/partials/table?sort=hex&dir={% if sort == "hex" && dir == "asc" %}desc{% else %}asc{% endif %}"
+          hx-get="/partials/table?sort=hex&dir={% if sort == "hex" && dir == "asc" %}desc{% else %}asc{% endif %}&q={{ q }}"
           hx-target="#fleet">Hex</th>
       <th class="{% if sort == "callsign" %}active {{ dir }}{% endif %}"
-          hx-get="/partials/table?sort=callsign&dir={% if sort == "callsign" && dir == "asc" %}desc{% else %}asc{% endif %}"
+          hx-get="/partials/table?sort=callsign&dir={% if sort == "callsign" && dir == "asc" %}desc{% else %}asc{% endif %}&q={{ q }}"
           hx-target="#fleet">Callsign</th>
+      <th class="{% if sort == "registration" %}active {{ dir }}{% endif %}"
+          hx-get="/partials/table?sort=registration&dir={% if sort == "registration" && dir == "asc" %}desc{% else %}asc{% endif %}&q={{ q }}"
+          hx-target="#fleet">Registration</th>
+      <th class="{% if sort == "typecode" %}active {{ dir }}{% endif %}"
+          hx-get="/partials/table?sort=typecode&dir={% if sort == "typecode" && dir == "asc" %}desc{% else %}asc{% endif %}&q={{ q }}"
+          hx-target="#fleet">Type</th>
+      <th>Squawk</th>
+      <th>Cat</th>
       <th class="{% if sort == "first_seen" %}active {{ dir }}{% endif %}"
-          hx-get="/partials/table?sort=first_seen&dir={% if sort == "first_seen" && dir == "desc" %}asc{% else %}desc{% endif %}"
+          hx-get="/partials/table?sort=first_seen&dir={% if sort == "first_seen" && dir == "desc" %}asc{% else %}desc{% endif %}&q={{ q }}"
           hx-target="#fleet">First seen</th>
       <th class="{% if sort == "last_seen" %}active {{ dir }}{% endif %}"
-          hx-get="/partials/table?sort=last_seen&dir={% if sort == "last_seen" && dir == "desc" %}asc{% else %}desc{% endif %}"
+          hx-get="/partials/table?sort=last_seen&dir={% if sort == "last_seen" && dir == "desc" %}asc{% else %}desc{% endif %}&q={{ q }}"
           hx-target="#fleet">Last seen</th>
       <th class="{% if sort == "sightings" %}active {{ dir }}{% endif %}"
-          hx-get="/partials/table?sort=sightings&dir={% if sort == "sightings" && dir == "desc" %}asc{% else %}desc{% endif %}"
+          hx-get="/partials/table?sort=sightings&dir={% if sort == "sightings" && dir == "desc" %}asc{% else %}desc{% endif %}&q={{ q }}"
           hx-target="#fleet">Polls seen</th>
       <th class="{% if sort == "max_alt_ft" %}active {{ dir }}{% endif %}"
-          hx-get="/partials/table?sort=max_alt_ft&dir={% if sort == "max_alt_ft" && dir == "desc" %}asc{% else %}desc{% endif %}"
+          hx-get="/partials/table?sort=max_alt_ft&dir={% if sort == "max_alt_ft" && dir == "desc" %}asc{% else %}desc{% endif %}&q={{ q }}"
           hx-target="#fleet">Max alt (ft)</th>
       <th class="{% if sort == "max_gs_kts" %}active {{ dir }}{% endif %}"
-          hx-get="/partials/table?sort=max_gs_kts&dir={% if sort == "max_gs_kts" && dir == "desc" %}asc{% else %}desc{% endif %}"
+          hx-get="/partials/table?sort=max_gs_kts&dir={% if sort == "max_gs_kts" && dir == "desc" %}asc{% else %}desc{% endif %}&q={{ q }}"
           hx-target="#fleet">Max speed (kt)</th>
       <th class="{% if sort == "max_range_nm" %}active {{ dir }}{% endif %}"
-          hx-get="/partials/table?sort=max_range_nm&dir={% if sort == "max_range_nm" && dir == "desc" %}asc{% else %}desc{% endif %}"
+          hx-get="/partials/table?sort=max_range_nm&dir={% if sort == "max_range_nm" && dir == "desc" %}asc{% else %}desc{% endif %}&q={{ q }}"
           hx-target="#fleet">Max range (nm)</th>
     </tr>
   </thead>
   <tbody>
     {% for a in rows %}
     <tr>
-      <td>{{ a.hex }}</td>
+      <td><a href="/aircraft/{{ a.hex }}">{{ a.hex }}</a></td>
       <td>{{ a.last_flight.as_deref().unwrap_or("") }}</td>
+      <td>{% if let Some(v) = a.registration %}{{ v }}{% else %}-{% endif %}</td>
+      <td class="mono">{% if let Some(v) = a.typecode %}{{ v }}{% else %}-{% endif %}</td>
+      <td>{% if let Some(v) = a.last_squawk %}{{ v }}{% else %}-{% endif %}</td>
+      <td>{% if let Some(v) = a.last_category %}{{ v }}{% else %}-{% endif %}</td>
       <td>{{ a.first_seen_str() }}</td>
       <td>{{ a.last_seen_str() }}</td>
       <td>{{ a.sightings }}</td>

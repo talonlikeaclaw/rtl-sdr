@@ -1,12 +1,13 @@
 use std::time::Duration;
 
-use rusqlite::params;
+use rusqlite::{params, OptionalExtension};
 use serde::Deserialize;
 
 use crate::Db;
 
 const POLL_INTERVAL: Duration = Duration::from_secs(10);
 const LIVE_SEEN_MAX: f64 = 60.0;
+const VISIT_GAP_SECS: f64 = 600.0;
 const PRUNE_AFTER_DAYS: f64 = 90.0;
 
 /// `alt_baro` is either a number or the string "ground".
@@ -29,6 +30,13 @@ struct Aircraft {
     category: Option<String>,
     messages: Option<i64>,
     seen: Option<f64>,
+    lat: Option<f64>,
+    lon: Option<f64>,
+    track: Option<f64>,
+    baro_rate: Option<f64>,
+    nav_altitude_mcp: Option<f64>,
+    nav_heading: Option<f64>,
+    emergency: Option<String>,
 }
 
 #[derive(Deserialize, Debug)]
@@ -89,22 +97,55 @@ fn record_poll(db: &Db, now: f64, live: &[&Aircraft], messages: i64) -> rusqlite
             "INSERT INTO aircraft
                (hex, first_seen, last_seen, sightings,
                 last_flight, last_squawk, last_category,
-                max_alt_ft, max_gs_kts, max_range_nm, min_rssi_dbfs)
-             VALUES (?1, ?2, ?2, 1, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
+                max_alt_ft, max_gs_kts, max_range_nm, max_rssi_dbfs,
+                last_lat, last_lon, last_track,
+                max_baro_rate, min_baro_rate,
+                last_nav_alt_ft, last_nav_heading, last_emergency)
+             VALUES (?1, ?2, ?2, 1, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?13, ?14, ?15, ?16)
              ON CONFLICT(hex) DO UPDATE SET
                last_seen = excluded.last_seen,
                sightings = aircraft.sightings + 1,
                last_flight = coalesce(excluded.last_flight, aircraft.last_flight),
                last_squawk = coalesce(excluded.last_squawk, aircraft.last_squawk),
                last_category = coalesce(excluded.last_category, aircraft.last_category),
+               last_lat = coalesce(excluded.last_lat, aircraft.last_lat),
+               last_lon = coalesce(excluded.last_lon, aircraft.last_lon),
+               last_track = coalesce(excluded.last_track, aircraft.last_track),
+               last_nav_alt_ft = coalesce(excluded.last_nav_alt_ft, aircraft.last_nav_alt_ft),
+               last_nav_heading = coalesce(excluded.last_nav_heading, aircraft.last_nav_heading),
+               last_emergency = coalesce(excluded.last_emergency, aircraft.last_emergency),
                max_alt_ft = nullif(MAX(ifnull(aircraft.max_alt_ft, -2147483648),
                                        ifnull(excluded.max_alt_ft, -2147483648)), -2147483648),
                max_gs_kts = nullif(MAX(ifnull(aircraft.max_gs_kts, -1e30),
                                         ifnull(excluded.max_gs_kts, -1e30)), -1e30),
                max_range_nm = nullif(MAX(ifnull(aircraft.max_range_nm, -1e30),
                                          ifnull(excluded.max_range_nm, -1e30)), -1e30),
-               min_rssi_dbfs = nullif(MIN(ifnull(aircraft.min_rssi_dbfs, 1e30),
-                                          ifnull(excluded.min_rssi_dbfs, 1e30)), 1e30)",
+               max_rssi_dbfs = nullif(MAX(ifnull(aircraft.max_rssi_dbfs, -1e30),
+                                           ifnull(excluded.max_rssi_dbfs, -1e30)), -1e30),
+               max_baro_rate = nullif(MAX(ifnull(aircraft.max_baro_rate, -2147483648),
+                                          ifnull(excluded.max_baro_rate, -2147483648)), -2147483648),
+               min_baro_rate = nullif(MIN(ifnull(aircraft.min_baro_rate, 2147483647),
+                                          ifnull(excluded.min_baro_rate, 2147483647)), 2147483647)",
+        )?;
+
+        let mut callsigns = tx.prepare(
+            "INSERT INTO aircraft_callsigns (hex, callsign, first_seen, last_seen, sightings)
+             VALUES (?1, ?2, ?3, ?3, 1)
+             ON CONFLICT(hex, callsign) DO UPDATE SET
+               last_seen = excluded.last_seen,
+               sightings = aircraft_callsigns.sightings + 1",
+        )?;
+        let mut last_visit = tx.prepare(
+            "SELECT start_ts, end_ts FROM visits WHERE hex = ?1 ORDER BY start_ts DESC LIMIT 1",
+        )?;
+        let mut visits = tx.prepare(
+            "INSERT INTO visits (hex, start_ts, end_ts, polls) VALUES (?1, ?2, ?2, 1)",
+        )?;
+        let mut visit_extend = tx.prepare(
+            "UPDATE visits SET end_ts = ?1, polls = polls + 1 WHERE hex = ?2 AND start_ts = ?3",
+        )?;
+        let mut emergency = tx.prepare(
+            "INSERT OR REPLACE INTO emergency_log (ts, hex, squawk, emergency) VALUES (?1, ?2, ?3, ?4)",
         )?;
 
         for a in live {
@@ -124,7 +165,45 @@ fn record_poll(db: &Db, now: f64, live: &[&Aircraft], messages: i64) -> rusqlite
                 a.gs,
                 a.r_dst,
                 a.rssi,
+                a.lat,
+                a.lon,
+                a.track,
+                a.baro_rate.map(|v| v as i64),
+                a.nav_altitude_mcp.map(|v| v as i64),
+                a.nav_heading,
+                a.emergency,
             ])?;
+
+            let emergency_str = a.emergency.as_deref().filter(|e| *e != "none");
+            let emergency_squawk =
+                a.squawk.as_deref().filter(|s| matches!(*s, "7500" | "7600" | "7700"));
+            if emergency_str.is_some() || emergency_squawk.is_some() {
+                emergency.execute(params![
+                    now,
+                    a.hex.to_lowercase(),
+                    a.squawk,
+                    emergency_str.unwrap_or("squawk"),
+                ])?;
+            }
+
+            if let Some(cs) = flight {
+                callsigns.execute(params![a.hex.to_lowercase(), cs, now])?;
+            }
+
+            let last: Option<(f64, f64)> = last_visit
+                .query_row(params![a.hex.to_lowercase()], |r| Ok((r.get(0)?, r.get(1)?)))
+                .optional()?;
+            match last {
+                None => {
+                    visits.execute(params![a.hex.to_lowercase(), now])?;
+                }
+                Some((start_ts, end_ts)) if now - end_ts > VISIT_GAP_SECS => {
+                    visits.execute(params![a.hex.to_lowercase(), now])?;
+                }
+                Some((start_ts, _)) => {
+                    visit_extend.execute(params![now, a.hex.to_lowercase(), start_ts])?;
+                }
+            }
         }
     }
 

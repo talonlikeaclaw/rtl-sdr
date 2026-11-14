@@ -1,0 +1,18 @@
+<table>
+  <thead>
+    <tr><th>Time</th><th>Hex</th><th>Squawk</th><th>Emergency</th></tr>
+  </thead>
+  <tbody>
+    {% for e in emergencies %}
+    <tr>
+      <td>{{ e.ts_str() }}</td>
+      <td><a href="/aircraft/{{ e.hex }}">{{ e.hex }}</a></td>
+      <td>{% if let Some(s) = e.squawk %}{{ s }}{% else %}-{% endif %}</td>
+      <td class="emergency">{{ e.emergency }}</td>
+    </tr>
+    {% endfor %}
+    {% if emergencies.is_empty() %}
+    <tr><td colspan="4">No emergencies logged.</td></tr>
+    {% endif %}
+  </tbody>
+</table>

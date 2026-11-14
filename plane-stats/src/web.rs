@@ -15,9 +15,13 @@ const APP_CSS: &[u8] = include_bytes!("../static/app.css");
 pub fn router(db: Db) -> Router {
     Router::new()
         .route("/", get(index))
+        .route("/aircraft/:hex", get(aircraft_profile))
+        .route("/api/aircraft/:hex", get(api_aircraft_hex))
         .route("/partials/table", get(table_partial))
         .route("/partials/cards", get(cards_partial))
+        .route("/partials/emergencies", get(emergencies_partial))
         .route("/api/aircraft", get(api_aircraft))
+        .route("/api/emergencies", get(api_emergencies))
         .route("/api/stats", get(api_stats))
         .route("/htmx.min.js", get(htmx_js))
         .route("/app.css", get(app_css))
@@ -43,8 +47,10 @@ struct IndexTemplate {
     stats: Stats,
     rows: Vec<AircraftRow>,
     recent: Vec<AircraftRow>,
+    emergencies: Vec<stats::EmergencyRow>,
     sort: String,
     dir: String,
+    q: String,
 }
 
 async fn index(State(db): State<Db>, Query(q): Query<SortParams>) -> Result<Html<String>, AppError> {
@@ -54,11 +60,12 @@ async fn index(State(db): State<Db>, Query(q): Query<SortParams>) -> Result<Html
     } else {
         stats::sort_column(&sort).1.to_string()
     };
-    let rows = stats::aircraft_sorted(&db, &sort, &dir)?;
+    let rows = stats::aircraft_sorted(&db, &sort, &dir, &q.q)?;
     let st = stats::stats(&db, now())?;
     let recent = stats::recent_arrivals(&db)?;
+    let emergencies = stats::emergency_log(&db, 20)?;
     Ok(Html(
-        IndexTemplate { stats: st, rows, recent, sort, dir }
+        IndexTemplate { stats: st, rows, recent, emergencies, sort, dir, q: q.q.clone() }
             .render()?,
     ))
 }
@@ -69,6 +76,8 @@ struct SortParams {
     sort: String,
     #[serde(default)]
     dir: String,
+    #[serde(default)]
+    q: String,
 }
 #[derive(Template)]
 #[template(path = "partials/table.html")]
@@ -76,20 +85,21 @@ struct TableTemplate {
     rows: Vec<AircraftRow>,
     sort: String,
     dir: String,
+    q: String,
 }
 
 async fn table_partial(
     State(db): State<Db>,
     Query(q): Query<SortParams>,
 ) -> Result<Html<String>, AppError> {
-    let rows = stats::aircraft_sorted(&db, &q.sort, &q.dir)?;
+    let rows = stats::aircraft_sorted(&db, &q.sort, &q.dir, &q.q)?;
     let sort = if q.sort.is_empty() { "last_seen".to_string() } else { q.sort.clone() };
     let dir = if stats::is_valid_dir(&q.dir) {
         q.dir
     } else {
         stats::sort_column(&sort).1.to_string()
     };
-    Ok(Html(TableTemplate { rows, sort, dir }.render()?))
+    Ok(Html(TableTemplate { rows, sort, dir, q: q.q }.render()?))
 }
 
 #[derive(Template)]
@@ -102,9 +112,111 @@ async fn cards_partial(State(db): State<Db>) -> Result<Html<String>, AppError> {
     Ok(Html(CardsTemplate { stats: stats::stats(&db, now())? }.render()?))
 }
 
-async fn api_aircraft(State(db): State<Db>) -> Result<Json, AppError> {
-    let rows = stats::aircraft_sorted(&db, "last_seen", "desc")?;
+#[derive(Template)]
+#[template(path = "partials/emergencies.html")]
+struct EmergenciesTemplate {
+    emergencies: Vec<stats::EmergencyRow>,
+}
+
+async fn emergencies_partial(State(db): State<Db>) -> Result<Html<String>, AppError> {
+    Ok(Html(EmergenciesTemplate { emergencies: stats::emergency_log(&db, 20)? }.render()?))
+}
+
+#[derive(Deserialize, Default)]
+struct LimitParams {
+    #[serde(default)]
+    limit: Option<u32>,
+}
+
+async fn api_emergencies(
+    State(db): State<Db>,
+    Query(q): Query<LimitParams>,
+) -> Result<Json, AppError> {
+    let limit = q.limit.unwrap_or(20).clamp(1, 500);
+    Ok(Json(serde_json::to_value(stats::emergency_log(&db, limit)?)?))
+}
+
+async fn api_aircraft(State(db): State<Db>, Query(q): Query<SortParams>) -> Result<Json, AppError> {
+    let rows = stats::aircraft_sorted(&db, &q.sort, &q.dir, &q.q)?;
     Ok(Json(serde_json::to_value(rows)?))
+}
+
+#[derive(Template)]
+#[template(path = "aircraft.html")]
+struct AircraftTemplate {
+    row: AircraftRow,
+    enrich: Option<stats::Enrichment>,
+    callsigns: Vec<stats::CallsignRow>,
+    visits: Vec<VisitView>,
+}
+
+struct VisitView {
+    start_ts: f64,
+    end_ts: f64,
+    polls: i64,
+    duration: String,
+}
+
+impl VisitView {
+    fn fmt_ts(epoch: f64) -> String {
+        chrono::DateTime::from_timestamp(epoch as i64, 0).expect("valid ts").with_timezone(&chrono::Local)
+            .format("%Y-%m-%d %H:%M:%S")
+            .to_string()
+    }
+    pub fn start_str(&self) -> String {
+        Self::fmt_ts(self.start_ts)
+    }
+    pub fn end_str(&self) -> String {
+        Self::fmt_ts(self.end_ts)
+    }
+}
+
+fn fmt_duration(secs: f64) -> String {
+    let total_min = (secs / 60.0).round() as i64;
+    let h = total_min / 60;
+    let m = total_min % 60;
+    if h > 0 { format!("{h}h {m}m") } else { format!("{m}m") }
+}
+
+async fn aircraft_profile(
+    State(db): State<Db>,
+    axum::extract::Path(hex): axum::extract::Path<String>,
+) -> Result<Html<String>, AppError> {
+    let hex = hex.to_lowercase();
+    let Some(row) = stats::aircraft_by_hex(&db, &hex)? else {
+        return Err(AppError(StatusCode::NOT_FOUND, format!("unknown aircraft {hex}")));
+    };
+    let enrich = stats::enrichment_for(&db, &hex)?;
+    let callsigns = stats::callsigns_for(&db, &hex)?;
+    let visits = stats::visits_for(&db, &hex)?
+        .into_iter()
+        .map(|v| VisitView {
+            start_ts: v.start_ts,
+            end_ts: v.end_ts,
+            polls: v.polls,
+            duration: fmt_duration(v.end_ts - v.start_ts),
+        })
+        .collect();
+    Ok(Html(AircraftTemplate { row, enrich, callsigns, visits }.render()?))
+}
+
+async fn api_aircraft_hex(
+    State(db): State<Db>,
+    axum::extract::Path(hex): axum::extract::Path<String>,
+) -> Result<Json, AppError> {
+    let hex = hex.to_lowercase();
+    let Some(row) = stats::aircraft_by_hex(&db, &hex)? else {
+        return Err(AppError(StatusCode::NOT_FOUND, format!("unknown aircraft {hex}")));
+    };
+    let enrich = stats::enrichment_for(&db, &hex)?;
+    let callsigns = stats::callsigns_for(&db, &hex)?;
+    let visits = stats::visits_for(&db, &hex)?;
+    Ok(Json(serde_json::json!({
+        "aircraft": row,
+        "enrichment": enrich,
+        "callsigns": callsigns,
+        "visits": visits,
+    })))
 }
 impl From<rusqlite::Error> for AppError {
     fn from(e: rusqlite::Error) -> Self {
