@@ -30,6 +30,10 @@ Built and working:
   100 rows/page, pager preserving `sort/dir/q`, page kept across the 10 s
   refresh (`#fleet-controls` form + hidden `page`). `/api/aircraft` stays a
   full list.
+- Fleet filter chips: `FleetFilter` in `stats.rs` (search, `cat`, `mil`,
+  `today`, `new7`, `alt_min`/`alt_max`) compiles to a named-param `WHERE`;
+  chip row in `#fleet-controls`, `filter_suffix` on sort/pager links, and
+  `db_flags` stored from tar1090 `dbFlags` (bit 0 = military).
 
 Known loose ends:
 
@@ -120,8 +124,9 @@ stable ordering across pages, `?page=2` differs.
 
 ## Step 4 — Filter chips
 
-**Goal:** category / military / seen-today / new-this-week / altitude filters
-that compose with search and sort.
+**Goal:** category / military / interesting / privacy / emergency-history /
+seen-today / new-this-week / dormant / regulars / altitude filters that compose
+with search and sort.
 
 **Files:** `main.rs`, `poller.rs`, `stats.rs`, `web.rs`, `index.html`,
 `partials/table.html`.
@@ -129,9 +134,15 @@ that compose with search and sort.
 **Schema:** `("aircraft", "db_flags", "INTEGER")`. Poller stores `a.db_flags`.
 
 **Stats:** replace the `?1` search SQL with named params (`:q :cat :mil :today
-:new7 :alt_min :alt_max`) and a `Vec<String>` of WHERE clauses.
+:new7 :interesting :privacy :emergency :regular :dormant :alt_min :alt_max`)
+and a `Vec<String>` of WHERE clauses.
 
 - `mil` → `(a.db_flags & 1) = 1` (tar1090 `planeObject.js` uses `dbFlags & 1`).
+- `interesting` → `(a.db_flags & 2) = 2`.
+- `privacy` → `(a.db_flags & 12) != 0` (PIA bit 2, LADD bit 3).
+- `emergency` → `EXISTS (SELECT 1 FROM emergency_log el WHERE el.hex = a.hex)`.
+- `regular` → at least 5 rows in `visits` for the hex (distinct passes).
+- `dormant` → `a.last_seen < :dormant_start` (not seen for 7 days).
 - `today` → `a.last_seen >= :today_start` (heard today, not first seen).
 - `new7` → `a.first_seen >= :now - 604800`.
 - `cat` → `a.last_category`; UI groups `A*` as "fixed wing".
@@ -258,7 +269,7 @@ re-notify; denied permission leaves the page functional.
 | 1. Deep links | done | 047272d |
 | 2. Live panel | done | `plane-stats: live overhead panel with current state` |
 | 3. Pagination | done | `plane-stats: paginate fleet table` |
-| 4. Filters | pending | — |
+| 4. Filters | done | `plane-stats: fleet filters (category, military, recency, altitude)` |
 | 5. `day_aircraft` + `/today` | pending | — |
 | 6. Heatmap + range history | pending | — |
 | 7. Notifications | pending | — |

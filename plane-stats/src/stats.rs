@@ -1,4 +1,5 @@
 use chrono::TimeZone;
+use rusqlite::types::Value;
 use rusqlite::{params, Connection, OptionalExtension, Row};
 
 use crate::Db;
@@ -10,6 +11,14 @@ pub const LIVE_WINDOW_SECS: f64 = 60.0;
 
 /// Rows per page of the all-time fleet table.
 pub const PAGE_SIZE: u32 = 100;
+
+/// A "regular" was seen on at least this many separate visits. A visit ends
+/// after 10 minutes without a poll (`poller::VISIT_GAP_SECS`), so this counts
+/// distinct passes rather than one long one.
+const REGULAR_VISITS: i64 = 5;
+
+/// "Dormant" aircraft have not been seen for this long.
+const DORMANT_SECS: f64 = 7.0 * 86_400.0;
 
 #[derive(Debug, serde::Serialize)]
 pub struct AircraftRow {
@@ -210,6 +219,25 @@ const COLS: &str = "a.hex, a.first_seen, a.last_seen, a.sightings, a.last_flight
                     a.last_alt_ft, a.last_gs_kts, a.last_range_nm, a.last_baro_rate, a.last_msg_age";
 const FROM: &str = "FROM aircraft a LEFT JOIN enrichment e ON e.icao24 = a.hex";
 
+/// Sort keys accepted from the query string.
+const SORT_KEYS: &[&str] = &[
+    "hex",
+    "callsign",
+    "first_seen",
+    "last_seen",
+    "sightings",
+    "max_alt_ft",
+    "max_gs_kts",
+    "max_range_nm",
+    "registration",
+    "typecode",
+];
+
+/// Whether `sort` names a column the fleet table can order by.
+pub fn is_valid_sort(sort: &str) -> bool {
+    SORT_KEYS.contains(&sort)
+}
+
 /// Whitelist sort keys -> (SQL column, default direction).
 pub fn sort_column(sort: &str) -> (&'static str, &'static str) {
     match sort {
@@ -231,56 +259,212 @@ pub fn is_valid_dir(dir: &str) -> bool {
     dir == "asc" || dir == "desc"
 }
 
-/// Shared search filter for the fleet queries. `?1` is the needle.
-fn fleet_where(search: &str) -> &'static str {
-    if search.trim().is_empty() {
-        ""
-    } else {
-        "WHERE a.hex LIKE ?1 OR a.last_flight LIKE ?1
-            OR e.registration LIKE ?1 OR e.model LIKE ?1 OR e.typecode LIKE ?1
-            OR e.owner LIKE ?1 OR e.operator LIKE ?1"
-    }
+/// Filters for the all-time fleet table. Empty/false fields are inactive.
+#[derive(Debug, Clone, Default)]
+pub struct FleetFilter {
+    pub q: String,
+    /// "" = any, "fixed" = A1-A6, "heli" = A7.
+    pub cat: String,
+    pub mil: bool,
+    pub today: bool,
+    pub new7: bool,
+    /// tar1090 `dbFlags` bit 1.
+    pub interesting: bool,
+    /// tar1090 `dbFlags` bits 2 (PIA) or 3 (LADD).
+    pub privacy: bool,
+    /// Has at least one row in `emergency_log`.
+    pub emergency: bool,
+    /// Seen on `REGULAR_VISITS` or more separate visits.
+    pub regular: bool,
+    /// Not seen for `DORMANT_SECS`.
+    pub dormant: bool,
+    pub alt_min: Option<i64>,
+    pub alt_max: Option<i64>,
+}
+
+/// Local midnight as an epoch timestamp, matching the cards' "today" bucket.
+fn local_today_start() -> f64 {
+    chrono::Local::now()
+        .date_naive()
+        .and_hms_opt(0, 0, 0)
+        .expect("midnight")
+        .and_local_timezone(chrono::Local)
+        .single()
+        .expect("unambiguous local midnight")
+        .timestamp() as f64
 }
 
 fn fleet_needle(search: &str) -> String {
     format!("%{}%", search.trim().to_lowercase())
 }
 
+/// Percent-encode every byte outside the unreserved set so a needle survives
+/// `&`, `=`, `#`, spaces, and non-ASCII inside a link.
+fn urlencode(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    for b in s.bytes() {
+        if b.is_ascii_alphanumeric() || matches!(b, b'-' | b'_' | b'.' | b'~') {
+            out.push(b as char);
+        } else {
+            out.push_str(&format!("%{b:02X}"));
+        }
+    }
+    out
+}
+
+/// A WHERE clause plus its named parameters, ready to bind.
+struct FleetSql {
+    where_clause: String,
+    params: Vec<(&'static str, Value)>,
+}
+
+impl FleetSql {
+    fn bind(&self) -> Vec<(&'static str, &dyn rusqlite::ToSql)> {
+        self.params.iter().map(|(n, v)| (*n, v as &dyn rusqlite::ToSql)).collect()
+    }
+}
+
+impl FleetFilter {
+    fn to_sql(&self, now: f64) -> FleetSql {
+        let mut clauses: Vec<&'static str> = Vec::new();
+        let mut params: Vec<(&'static str, Value)> = Vec::new();
+
+        if !self.q.trim().is_empty() {
+            clauses.push(
+                "(a.hex LIKE :q OR a.last_flight LIKE :q
+                  OR e.registration LIKE :q OR e.model LIKE :q OR e.typecode LIKE :q
+                  OR e.owner LIKE :q OR e.operator LIKE :q)",
+            );
+            params.push((":q", Value::Text(fleet_needle(&self.q))));
+        }
+        match self.cat.as_str() {
+            "fixed" => clauses.push("a.last_category IN ('A1','A2','A3','A4','A5','A6')"),
+            "heli" => clauses.push("a.last_category = 'A7'"),
+            _ => {}
+        }
+        if self.mil {
+            clauses.push("(a.db_flags & 1) = 1");
+        }
+        if self.today {
+            clauses.push("a.last_seen >= :today_start");
+            params.push((":today_start", Value::Real(local_today_start())));
+        }
+        if self.new7 {
+            clauses.push("a.first_seen >= :new7_start");
+            params.push((":new7_start", Value::Real(now - 7.0 * 86_400.0)));
+        }
+        if self.interesting {
+            clauses.push("(a.db_flags & 2) = 2");
+        }
+        if self.privacy {
+            clauses.push("(a.db_flags & 12) != 0");
+        }
+        if self.emergency {
+            clauses.push("EXISTS (SELECT 1 FROM emergency_log el WHERE el.hex = a.hex)");
+        }
+        if self.regular {
+            clauses.push("(SELECT COUNT(*) FROM visits v WHERE v.hex = a.hex) >= :regular_visits");
+            params.push((":regular_visits", Value::Integer(REGULAR_VISITS)));
+        }
+        if self.dormant {
+            clauses.push("a.last_seen < :dormant_start");
+            params.push((":dormant_start", Value::Real(now - DORMANT_SECS)));
+        }
+        if let Some(v) = self.alt_min {
+            clauses.push("a.max_alt_ft >= :alt_min");
+            params.push((":alt_min", Value::Integer(v)));
+        }
+        if let Some(v) = self.alt_max {
+            clauses.push("a.max_alt_ft <= :alt_max");
+            params.push((":alt_max", Value::Integer(v)));
+        }
+
+        let where_clause =
+            if clauses.is_empty() { String::new() } else { format!("WHERE {}", clauses.join(" AND ")) };
+        FleetSql { where_clause, params }
+    }
+
+    /// Query-string suffix (leading `&`) carrying the active filters, for links
+    /// that already set `sort`/`dir` (and `page`).
+    pub fn query_suffix(&self) -> String {
+        let mut s = String::new();
+        let q = self.q.trim();
+        if !q.is_empty() {
+            s.push_str("&q=");
+            s.push_str(&urlencode(q));
+        }
+        if self.cat == "fixed" || self.cat == "heli" {
+            s.push_str("&cat=");
+            s.push_str(&self.cat);
+        }
+        if self.mil {
+            s.push_str("&mil=1");
+        }
+        if self.today {
+            s.push_str("&today=1");
+        }
+        if self.new7 {
+            s.push_str("&new7=1");
+        }
+        if self.interesting {
+            s.push_str("&interesting=1");
+        }
+        if self.privacy {
+            s.push_str("&privacy=1");
+        }
+        if self.emergency {
+            s.push_str("&emergency=1");
+        }
+        if self.regular {
+            s.push_str("&regular=1");
+        }
+        if self.dormant {
+            s.push_str("&dormant=1");
+        }
+        if let Some(v) = self.alt_min {
+            s.push_str(&format!("&alt_min={v}"));
+        }
+        if let Some(v) = self.alt_max {
+            s.push_str(&format!("&alt_max={v}"));
+        }
+        s
+    }
+}
+
 pub fn aircraft_sorted(
     db: &Db,
     sort: &str,
     dir: &str,
-    search: &str,
+    filter: &FleetFilter,
     limit: u32,
     offset: u32,
+    now: f64,
 ) -> rusqlite::Result<Vec<AircraftRow>> {
     let (col, default_dir) = sort_column(sort);
     let dir = if is_valid_dir(dir) { dir } else { default_dir };
     let conn = db.lock().expect("db mutex");
-    let needle = fleet_needle(search);
+    let mut f = filter.to_sql(now);
+    f.params.push((":limit", Value::Integer(i64::from(limit))));
+    f.params.push((":offset", Value::Integer(i64::from(offset))));
     let sql = format!(
-        "SELECT {COLS} {FROM} {} ORDER BY {col} {dir}, a.hex ASC LIMIT ? OFFSET ?",
-        fleet_where(search)
+        "SELECT {COLS} {FROM} {} ORDER BY {col} {dir}, a.hex ASC LIMIT :limit OFFSET :offset",
+        f.where_clause
     );
     let mut stmt = conn.prepare(&sql)?;
-    let rows = if search.trim().is_empty() {
-        stmt.query_map(params![limit, offset], row_to_aircraft)?
-    } else {
-        stmt.query_map(params![needle, limit, offset], row_to_aircraft)?
-    };
-    rows.collect()
+    let params = f.bind();
+    let rows: Vec<AircraftRow> =
+        stmt.query_map(&params[..], row_to_aircraft)?.collect::<rusqlite::Result<_>>()?;
+    Ok(rows)
 }
 
 /// Number of aircraft matching the same filter as `aircraft_sorted`.
-pub fn aircraft_count(db: &Db, search: &str) -> rusqlite::Result<i64> {
+pub fn aircraft_count(db: &Db, filter: &FleetFilter, now: f64) -> rusqlite::Result<i64> {
     let conn = db.lock().expect("db mutex");
-    let sql = format!("SELECT COUNT(*) {FROM} {}", fleet_where(search));
+    let f = filter.to_sql(now);
+    let sql = format!("SELECT COUNT(*) {FROM} {}", f.where_clause);
     let mut stmt = conn.prepare(&sql)?;
-    if search.trim().is_empty() {
-        stmt.query_row([], |r| r.get(0))
-    } else {
-        stmt.query_row(params![fleet_needle(search)], |r| r.get(0))
-    }
+    let params = f.bind();
+    stmt.query_row(&params[..], |r| r.get(0))
 }
 
 pub fn recent_arrivals(db: &Db) -> rusqlite::Result<Vec<AircraftRow>> {
@@ -391,14 +575,7 @@ pub fn stats(db: &Db, now: f64) -> rusqlite::Result<Stats> {
     let total_aircraft: i64 = conn.query_row("SELECT COUNT(*) FROM aircraft", [], |r| r.get(0))?;
     let currently_airborne: i64 =
         conn.query_row("SELECT COUNT(*) FROM aircraft WHERE last_seen > ?1", params![now - 60.0], |r| r.get(0))?;
-    let today_start = chrono::Local::now()
-        .date_naive()
-        .and_hms_opt(0, 0, 0)
-        .expect("midnight")
-        .and_local_timezone(chrono::Local)
-        .single()
-        .expect("unambiguous local midnight")
-        .timestamp() as f64;
+    let today_start = local_today_start();
     // Bucket poll_log by local hour/day. The offset is applied in SQL so the
     // stored epoch labels line up with what the cards render in local time.
     let tz_offset = chrono::Local::now().offset().local_minus_utc() as f64;

@@ -52,15 +52,116 @@
 
       <section class="glass panel" aria-label="All-time fleet">
         <h2>All-time fleet</h2>
-        <form id="fleet-controls" hx-get="/partials/table" hx-target="#fleet">
+        <form id="fleet-controls" hx-get="/partials/table" hx-target="#fleet"
+              hx-include="#fleet-sort, #fleet-dir">
           <input id="fleet-search" class="search" type="search" name="q" value="{{ q }}"
                  placeholder="Search hex, callsign, registration, type, owner, operator…"
                  hx-get="/partials/table" hx-trigger="input changed delay:400ms, search"
-                 hx-target="#fleet" hx-include="this" aria-label="Search fleet">
-          <div id="fleet" hx-get="/partials/table" hx-trigger="every 10s" hx-include="#fleet-controls">
-            {% include "partials/table.html" %}
+                 hx-target="#fleet" hx-include="#fleet-controls, #fleet-sort, #fleet-dir" aria-label="Search fleet">
+          <div class="filter-row" role="group" aria-label="Flag filters">
+            <span class="filter-label" aria-hidden="true">Flags</span>
+            <div class="chips">
+              <input type="checkbox" id="f-mil" name="mil" value="1" class="chip-toggle"
+                     {% if filter.mil %}checked{% endif %}
+                     hx-get="/partials/table" hx-trigger="change" hx-target="#fleet"
+                     hx-include="#fleet-controls, #fleet-sort, #fleet-dir">
+              <label class="chip" for="f-mil">Military</label>
+
+              <input type="checkbox" id="f-int" name="interesting" value="1" class="chip-toggle"
+                     {% if filter.interesting %}checked{% endif %}
+                     hx-get="/partials/table" hx-trigger="change" hx-target="#fleet"
+                     hx-include="#fleet-controls, #fleet-sort, #fleet-dir">
+              <label class="chip" for="f-int" title="Flagged interesting by tar1090">Interesting</label>
+
+              <input type="checkbox" id="f-priv" name="privacy" value="1" class="chip-toggle"
+                     {% if filter.privacy %}checked{% endif %}
+                     hx-get="/partials/table" hx-trigger="change" hx-target="#fleet"
+                     hx-include="#fleet-controls, #fleet-sort, #fleet-dir">
+              <label class="chip" for="f-priv" title="PIA or LADD privacy-requested aircraft">Privacy (PIA/LADD)</label>
+
+              <input type="checkbox" id="f-emerg" name="emergency" value="1" class="chip-toggle"
+                     {% if filter.emergency %}checked{% endif %}
+                     hx-get="/partials/table" hx-trigger="change" hx-target="#fleet"
+                     hx-include="#fleet-controls, #fleet-sort, #fleet-dir">
+              <label class="chip" for="f-emerg" title="Ever logged an emergency squawk">Emergency history</label>
+            </div>
+          </div>
+
+          <div class="filter-row" role="group" aria-label="Recency filters">
+            <span class="filter-label" aria-hidden="true">Recency</span>
+            <div class="chips">
+              <input type="checkbox" id="f-today" name="today" value="1" class="chip-toggle"
+                     {% if filter.today %}checked{% endif %}
+                     hx-get="/partials/table" hx-trigger="change" hx-target="#fleet"
+                     hx-include="#fleet-controls, #fleet-sort, #fleet-dir">
+              <label class="chip" for="f-today">Heard today</label>
+
+              <input type="checkbox" id="f-new7" name="new7" value="1" class="chip-toggle"
+                     {% if filter.new7 %}checked{% endif %}
+                     hx-get="/partials/table" hx-trigger="change" hx-target="#fleet"
+                     hx-include="#fleet-controls, #fleet-sort, #fleet-dir">
+              <label class="chip" for="f-new7">New this week</label>
+
+              <input type="checkbox" id="f-dormant" name="dormant" value="1" class="chip-toggle"
+                     {% if filter.dormant %}checked{% endif %}
+                     hx-get="/partials/table" hx-trigger="change" hx-target="#fleet"
+                     hx-include="#fleet-controls, #fleet-sort, #fleet-dir">
+              <label class="chip" for="f-dormant" title="Last seen more than 7 days ago">Not seen this week</label>
+
+              <input type="checkbox" id="f-regular" name="regular" value="1" class="chip-toggle"
+                     {% if filter.regular %}checked{% endif %}
+                     hx-get="/partials/table" hx-trigger="change" hx-target="#fleet"
+                     hx-include="#fleet-controls, #fleet-sort, #fleet-dir">
+              <label class="chip" for="f-regular" title="Seen on 5 or more separate visits">Regulars</label>
+            </div>
+          </div>
+
+          <div class="filter-row" role="group" aria-label="Type filters">
+            <span class="filter-label" aria-hidden="true">Type</span>
+            <div class="chips">
+              <input type="radio" id="f-cat-any" name="cat" value="" class="chip-toggle"
+                     {% if filter.cat.is_empty() %}checked{% endif %}
+                     hx-get="/partials/table" hx-trigger="change" hx-target="#fleet"
+                     hx-include="#fleet-controls, #fleet-sort, #fleet-dir">
+              <label class="chip" for="f-cat-any">Any type</label>
+
+              <input type="radio" id="f-cat-fixed" name="cat" value="fixed" class="chip-toggle"
+                     {% if filter.cat == "fixed" %}checked{% endif %}
+                     hx-get="/partials/table" hx-trigger="change" hx-target="#fleet"
+                     hx-include="#fleet-controls, #fleet-sort, #fleet-dir">
+              <label class="chip" for="f-cat-fixed">Fixed wing</label>
+
+              <input type="radio" id="f-cat-heli" name="cat" value="heli" class="chip-toggle"
+                     {% if filter.cat == "heli" %}checked{% endif %}
+                     hx-get="/partials/table" hx-trigger="change" hx-target="#fleet"
+                     hx-include="#fleet-controls, #fleet-sort, #fleet-dir">
+              <label class="chip" for="f-cat-heli">Helicopter</label>
+            </div>
+          </div>
+
+          <div class="filter-row" role="group" aria-label="Altitude filters">
+            <span class="filter-label" aria-hidden="true">Max altitude</span>
+            <div class="chips">
+              <label class="alt-field">≥
+                <input type="number" name="alt_min" min="0" step="100" inputmode="numeric"
+                       value="{% if let Some(v) = filter.alt_min %}{{ v }}{% endif %}"
+                       placeholder="ft" aria-label="Minimum max altitude in feet"
+                       hx-get="/partials/table" hx-trigger="change" hx-target="#fleet"
+                       hx-include="#fleet-controls, #fleet-sort, #fleet-dir">
+              </label>
+              <label class="alt-field">≤
+                <input type="number" name="alt_max" min="0" step="100" inputmode="numeric"
+                       value="{% if let Some(v) = filter.alt_max %}{{ v }}{% endif %}"
+                       placeholder="ft" aria-label="Maximum max altitude in feet"
+                       hx-get="/partials/table" hx-trigger="change" hx-target="#fleet"
+                       hx-include="#fleet-controls, #fleet-sort, #fleet-dir">
+              </label>
+            </div>
           </div>
         </form>
+        <div id="fleet" hx-get="/partials/table" hx-trigger="every 10s" hx-include="#fleet-controls, #fleet-page, #fleet-sort, #fleet-dir">
+          {% include "partials/table.html" %}
+        </div>
       </section>
 
       <section class="glass panel" aria-label="Recent new arrivals">

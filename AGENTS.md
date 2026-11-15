@@ -103,9 +103,18 @@ registration/type enrichment, emergency squawk log, tar1090 map/trace deep
 links, live "overhead now" panel (current alt/speed/climb/range/bearing/age from
 the `last_*` columns; `/partials/live` + `/api/live`, 5 s htmx refresh; bearing
 needs `RX_LAT`/`RX_LON`, wired from `READSB_LAT`/`READSB_LON` in compose), and
-fleet pagination (100 rows/page, pager preserves `sort/dir/q`, page survives the
-10 s refresh via the `#fleet-controls` form's hidden `page`; `/api/aircraft`
-stays a full list).
+fleet pagination (100 rows/page, pager preserves `sort/dir/q`; hidden
+`#fleet-sort`/`#fleet-dir` inputs keep the sort across the 10 s refresh, filter,
+and search requests, while `#fleet-page` keeps the page across the 10 s refresh
+only; `/api/aircraft` stays a full list), and fleet filter chips (category,
+military, interesting, privacy PIA/LADD, emergency history, heard today, new
+this week, not seen this week, regulars = 5+ visits, max-alt range;
+`FleetFilter` in `stats.rs`, `filter_suffix` on sort/pager links, `db_flags`
+stored from tar1090 `dbFlags`).
+
+Military, Interesting and Privacy rows only match once re-seen: `db_flags` was
+added after the fact, so older rows are NULL until the aircraft flies past
+again (tar1090 omits `dbFlags` when it is 0, hence the `coalesce` on upsert).
 
 Detailed step-by-step plan for the remaining work: `plane-stats/PLAN.md`.
 

@@ -36,6 +36,8 @@ struct Aircraft {
     nav_altitude_mcp: Option<f64>,
     nav_heading: Option<f64>,
     emergency: Option<String>,
+    #[serde(rename = "dbFlags")]
+    db_flags: Option<i64>,
 }
 
 #[derive(Deserialize, Debug)]
@@ -100,9 +102,9 @@ fn record_poll(db: &Db, now: f64, live: &[&Aircraft], messages: i64) -> rusqlite
                 last_lat, last_lon, last_track,
                 max_baro_rate, min_baro_rate,
                 last_nav_alt_ft, last_nav_heading, last_emergency,
-                last_alt_ft, last_gs_kts, last_range_nm, last_baro_rate, last_msg_age)
+                last_alt_ft, last_gs_kts, last_range_nm, last_baro_rate, last_msg_age, db_flags)
              VALUES (?1, ?2, ?2, 1, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?13, ?14, ?15, ?16,
-                     ?17, ?7, ?8, ?13, ?18)
+                     ?17, ?7, ?8, ?13, ?18, ?19)
              ON CONFLICT(hex) DO UPDATE SET
                last_seen = excluded.last_seen,
                sightings = aircraft.sightings + 1,
@@ -120,6 +122,7 @@ fn record_poll(db: &Db, now: f64, live: &[&Aircraft], messages: i64) -> rusqlite
                last_range_nm = excluded.last_range_nm,
                last_baro_rate = excluded.last_baro_rate,
                last_msg_age = excluded.last_msg_age,
+               db_flags = coalesce(excluded.db_flags, aircraft.db_flags),
                max_alt_ft = nullif(MAX(ifnull(aircraft.max_alt_ft, -2147483648),
                                        ifnull(excluded.max_alt_ft, -2147483648)), -2147483648),
                max_gs_kts = nullif(MAX(ifnull(aircraft.max_gs_kts, -1e30),
@@ -187,6 +190,7 @@ fn record_poll(db: &Db, now: f64, live: &[&Aircraft], messages: i64) -> rusqlite
                 a.emergency,
                 last_alt_ft,
                 a.seen,
+                a.db_flags,
             ])?;
 
             let emergency_str = a.emergency.as_deref().filter(|e| *e != "none");

@@ -115,6 +115,7 @@ fn main() {
         ("aircraft", "last_range_nm", "REAL"),
         ("aircraft", "last_baro_rate", "REAL"),
         ("aircraft", "last_msg_age", "REAL"),
+        ("aircraft", "db_flags", "INTEGER"),
     ];
     for (table, col, ddl) in NEW_COLUMNS {
         if let Err(e) = conn.execute(&format!("ALTER TABLE {table} ADD COLUMN {col} {ddl}"), []) {
