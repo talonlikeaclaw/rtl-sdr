@@ -26,6 +26,10 @@ Built and working:
   in the fleet table, map/trace pills on the profile.
 - Live "overhead now" panel: current alt/speed/climb/range/bearing/age from the
   `last_*` columns, `/partials/live` + `/api/live`, 5 s htmx refresh.
+- Fleet pagination: `aircraft_sorted(..., limit, offset)` + `aircraft_count`,
+  100 rows/page, pager preserving `sort/dir/q`, page kept across the 10 s
+  refresh (`#fleet-controls` form + hidden `page`). `/api/aircraft` stays a
+  full list.
 
 Known loose ends:
 
@@ -253,7 +257,7 @@ re-notify; denied permission leaves the page functional.
 |---|---|---|
 | 1. Deep links | done | 047272d |
 | 2. Live panel | done | `plane-stats: live overhead panel with current state` |
-| 3. Pagination | pending | — |
+| 3. Pagination | done | `plane-stats: paginate fleet table` |
 | 4. Filters | pending | — |
 | 5. `day_aircraft` + `/today` | pending | — |
 | 6. Heatmap + range history | pending | — |

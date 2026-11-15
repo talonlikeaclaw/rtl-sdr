@@ -102,7 +102,10 @@ Built: aircraft profile page (visits, callsigns, records), OpenSky
 registration/type enrichment, emergency squawk log, tar1090 map/trace deep
 links, live "overhead now" panel (current alt/speed/climb/range/bearing/age from
 the `last_*` columns; `/partials/live` + `/api/live`, 5 s htmx refresh; bearing
-needs `RX_LAT`/`RX_LON`, wired from `READSB_LAT`/`READSB_LON` in compose).
+needs `RX_LAT`/`RX_LON`, wired from `READSB_LAT`/`READSB_LON` in compose), and
+fleet pagination (100 rows/page, pager preserves `sort/dir/q`, page survives the
+10 s refresh via the `#fleet-controls` form's hidden `page`; `/api/aircraft`
+stays a full list).
 
 Detailed step-by-step plan for the remaining work: `plane-stats/PLAN.md`.
 

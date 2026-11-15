@@ -52,15 +52,15 @@
 
       <section class="glass panel" aria-label="All-time fleet">
         <h2>All-time fleet</h2>
-        <input id="fleet-search" class="search" type="search" name="q" value="{{ q }}"
-               placeholder="Search hex, callsign, registration, type, owner, operator…"
-               hx-get="/partials/table" hx-trigger="input changed delay:400ms, search"
-               hx-target="#fleet" hx-include="this" aria-label="Search fleet">
-        <div class="table-wrap">
-          <div id="fleet" hx-get="/partials/table" hx-trigger="every 10s" hx-include="#fleet-search">
+        <form id="fleet-controls" hx-get="/partials/table" hx-target="#fleet">
+          <input id="fleet-search" class="search" type="search" name="q" value="{{ q }}"
+                 placeholder="Search hex, callsign, registration, type, owner, operator…"
+                 hx-get="/partials/table" hx-trigger="input changed delay:400ms, search"
+                 hx-target="#fleet" hx-include="this" aria-label="Search fleet">
+          <div id="fleet" hx-get="/partials/table" hx-trigger="every 10s" hx-include="#fleet-controls">
             {% include "partials/table.html" %}
           </div>
-        </div>
+        </form>
       </section>
 
       <section class="glass panel" aria-label="Recent new arrivals">

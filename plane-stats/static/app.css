@@ -450,6 +450,20 @@ input.search {
 input.search::placeholder { color: var(--muted); }
 input.search:focus { border-color: var(--accent-dim); }
 
+/* Fleet pager */
+.pager {
+  display: flex;
+  align-items: center;
+  gap: 0.9rem;
+  margin-top: 0.7rem;
+  font-size: 0.78rem;
+  color: var(--muted);
+}
+.pager-info { margin-right: auto; }
+.pager-link { color: var(--accent); text-decoration: none; cursor: pointer; }
+.pager-link:hover { text-decoration: underline; }
+.pager-link.disabled { color: var(--muted); opacity: 0.45; cursor: default; }
+
 /* tar1090 deep links */
 .hero-actions {
   display: flex;

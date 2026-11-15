@@ -8,6 +8,9 @@ use crate::Db;
 /// `seen` age is at most this value, so the two stay in sync.
 pub const LIVE_WINDOW_SECS: f64 = 60.0;
 
+/// Rows per page of the all-time fleet table.
+pub const PAGE_SIZE: u32 = 100;
+
 #[derive(Debug, serde::Serialize)]
 pub struct AircraftRow {
     pub hex: String,
@@ -228,29 +231,56 @@ pub fn is_valid_dir(dir: &str) -> bool {
     dir == "asc" || dir == "desc"
 }
 
-pub fn aircraft_sorted(db: &Db, sort: &str, dir: &str, search: &str) -> rusqlite::Result<Vec<AircraftRow>> {
+/// Shared search filter for the fleet queries. `?1` is the needle.
+fn fleet_where(search: &str) -> &'static str {
+    if search.trim().is_empty() {
+        ""
+    } else {
+        "WHERE a.hex LIKE ?1 OR a.last_flight LIKE ?1
+            OR e.registration LIKE ?1 OR e.model LIKE ?1 OR e.typecode LIKE ?1
+            OR e.owner LIKE ?1 OR e.operator LIKE ?1"
+    }
+}
+
+fn fleet_needle(search: &str) -> String {
+    format!("%{}%", search.trim().to_lowercase())
+}
+
+pub fn aircraft_sorted(
+    db: &Db,
+    sort: &str,
+    dir: &str,
+    search: &str,
+    limit: u32,
+    offset: u32,
+) -> rusqlite::Result<Vec<AircraftRow>> {
     let (col, default_dir) = sort_column(sort);
     let dir = if is_valid_dir(dir) { dir } else { default_dir };
     let conn = db.lock().expect("db mutex");
-    let needle = format!("%{}%", search.trim().to_lowercase());
-    let sql = if search.trim().is_empty() {
-        format!("SELECT {COLS} {FROM} ORDER BY {col} {dir}, a.hex ASC")
-    } else {
-        format!(
-            "SELECT {COLS} {FROM}
-             WHERE a.hex LIKE ?1 OR a.last_flight LIKE ?1
-                OR e.registration LIKE ?1 OR e.model LIKE ?1 OR e.typecode LIKE ?1
-                OR e.owner LIKE ?1 OR e.operator LIKE ?1
-             ORDER BY {col} {dir}, a.hex ASC"
-        )
-    };
+    let needle = fleet_needle(search);
+    let sql = format!(
+        "SELECT {COLS} {FROM} {} ORDER BY {col} {dir}, a.hex ASC LIMIT ? OFFSET ?",
+        fleet_where(search)
+    );
     let mut stmt = conn.prepare(&sql)?;
     let rows = if search.trim().is_empty() {
-        stmt.query_map([], row_to_aircraft)?
+        stmt.query_map(params![limit, offset], row_to_aircraft)?
     } else {
-        stmt.query_map(params![needle], row_to_aircraft)?
+        stmt.query_map(params![needle, limit, offset], row_to_aircraft)?
     };
     rows.collect()
+}
+
+/// Number of aircraft matching the same filter as `aircraft_sorted`.
+pub fn aircraft_count(db: &Db, search: &str) -> rusqlite::Result<i64> {
+    let conn = db.lock().expect("db mutex");
+    let sql = format!("SELECT COUNT(*) {FROM} {}", fleet_where(search));
+    let mut stmt = conn.prepare(&sql)?;
+    if search.trim().is_empty() {
+        stmt.query_row([], |r| r.get(0))
+    } else {
+        stmt.query_row(params![fleet_needle(search)], |r| r.get(0))
+    }
 }
 
 pub fn recent_arrivals(db: &Db) -> rusqlite::Result<Vec<AircraftRow>> {

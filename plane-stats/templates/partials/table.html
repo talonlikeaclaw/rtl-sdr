@@ -1,4 +1,6 @@
-<table>
+<input type="hidden" name="page" value="{{ page }}">
+<div class="table-wrap">
+<table hx-disinherit="hx-include">
   <thead>
     <tr>
       <th class="{% if sort == "hex" %}active {{ dir }}{% endif %}"
@@ -61,3 +63,13 @@
     {% endfor %}
   </tbody>
 </table>
+</div>
+<div class="pager" hx-disinherit="hx-include">
+  {% if let Some(p) = prev_page %}
+  <a class="pager-link" hx-get="/partials/table?sort={{ sort }}&dir={{ dir }}&q={{ q }}&page={{ p }}" hx-target="#fleet">Prev</a>
+  {% else %}<span class="pager-link disabled">Prev</span>{% endif %}
+  <span class="pager-info">{% if total > 0 %}{{ from_row }}–{{ to_row }} of {{ total }}{% else %}no aircraft{% endif %} · page {{ page }} of {{ pages }}</span>
+  {% if let Some(p) = next_page %}
+  <a class="pager-link" hx-get="/partials/table?sort={{ sort }}&dir={{ dir }}&q={{ q }}&page={{ p }}" hx-target="#fleet">Next</a>
+  {% else %}<span class="pager-link disabled">Next</span>{% endif %}
+</div>

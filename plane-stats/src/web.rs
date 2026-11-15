@@ -86,6 +86,47 @@ struct IndexTemplate {
     tar1090: String,
     now: f64,
     rx: Option<(f64, f64)>,
+    page: u32,
+    pages: u32,
+    total: i64,
+    from_row: u32,
+    to_row: u32,
+    prev_page: Option<u32>,
+    next_page: Option<u32>,
+}
+
+/// Pager state for the all-time fleet table.
+struct PageNav {
+    page: u32,
+    pages: u32,
+    total: i64,
+    from_row: u32,
+    to_row: u32,
+    prev_page: Option<u32>,
+    next_page: Option<u32>,
+}
+
+/// Clamp the requested page into range and derive everything the pager shows.
+fn paginate(db: &Db, requested: Option<u32>, search: &str) -> rusqlite::Result<PageNav> {
+    let total = stats::aircraft_count(db, search)?;
+    let size = u64::from(stats::PAGE_SIZE);
+    let pages = ((total.max(0) as u64).div_ceil(size)).max(1) as u32;
+    let page = requested.unwrap_or(1).clamp(1, pages);
+    let (from_row, to_row) = if total > 0 {
+        let from = (page - 1) * stats::PAGE_SIZE + 1;
+        (from, (u64::from(from) + size - 1).min(total as u64) as u32)
+    } else {
+        (0, 0)
+    };
+    Ok(PageNav {
+        page,
+        pages,
+        total,
+        from_row,
+        to_row,
+        prev_page: (page > 1).then_some(page - 1),
+        next_page: (page < pages).then_some(page + 1),
+    })
 }
 
 async fn index(
@@ -99,7 +140,15 @@ async fn index(
     } else {
         stats::sort_column(&sort).1.to_string()
     };
-    let rows = stats::aircraft_sorted(&db, &sort, &dir, &q.q)?;
+    let nav = paginate(&db, q.page, &q.q)?;
+    let rows = stats::aircraft_sorted(
+        &db,
+        &sort,
+        &dir,
+        &q.q,
+        stats::PAGE_SIZE,
+        (nav.page - 1) * stats::PAGE_SIZE,
+    )?;
     let now = now();
     let st = stats::stats(&db, now)?;
     let recent = stats::recent_arrivals(&db)?;
@@ -116,6 +165,13 @@ async fn index(
             tar1090: tar1090_base(&headers),
             now,
             rx: stats::rx_pos(),
+            page: nav.page,
+            pages: nav.pages,
+            total: nav.total,
+            from_row: nav.from_row,
+            to_row: nav.to_row,
+            prev_page: nav.prev_page,
+            next_page: nav.next_page,
         }
         .render()?,
     ))
@@ -129,6 +185,8 @@ struct SortParams {
     dir: String,
     #[serde(default)]
     q: String,
+    #[serde(default)]
+    page: Option<u32>,
 }
 #[derive(Template)]
 #[template(path = "partials/table.html")]
@@ -139,6 +197,13 @@ struct TableTemplate {
     q: String,
     tar1090: String,
     now: f64,
+    page: u32,
+    pages: u32,
+    total: i64,
+    from_row: u32,
+    to_row: u32,
+    prev_page: Option<u32>,
+    next_page: Option<u32>,
 }
 
 async fn table_partial(
@@ -146,15 +211,38 @@ async fn table_partial(
     Query(q): Query<SortParams>,
     headers: HeaderMap,
 ) -> Result<Html<String>, AppError> {
-    let rows = stats::aircraft_sorted(&db, &q.sort, &q.dir, &q.q)?;
     let sort = if q.sort.is_empty() { "last_seen".to_string() } else { q.sort.clone() };
     let dir = if stats::is_valid_dir(&q.dir) {
         q.dir
     } else {
         stats::sort_column(&sort).1.to_string()
     };
+    let nav = paginate(&db, q.page, &q.q)?;
+    let rows = stats::aircraft_sorted(
+        &db,
+        &sort,
+        &dir,
+        &q.q,
+        stats::PAGE_SIZE,
+        (nav.page - 1) * stats::PAGE_SIZE,
+    )?;
     Ok(Html(
-        TableTemplate { rows, sort, dir, q: q.q, tar1090: tar1090_base(&headers), now: now() }.render()?,
+        TableTemplate {
+            rows,
+            sort,
+            dir,
+            q: q.q,
+            tar1090: tar1090_base(&headers),
+            now: now(),
+            page: nav.page,
+            pages: nav.pages,
+            total: nav.total,
+            from_row: nav.from_row,
+            to_row: nav.to_row,
+            prev_page: nav.prev_page,
+            next_page: nav.next_page,
+        }
+        .render()?,
     ))
 }
 
@@ -217,7 +305,8 @@ async fn api_emergencies(
 }
 
 async fn api_aircraft(State(db): State<Db>, Query(q): Query<SortParams>) -> Result<Json, AppError> {
-    let rows = stats::aircraft_sorted(&db, &q.sort, &q.dir, &q.q)?;
+    // The JSON API stays a full list; pagination is a UI concern (PLAN.md step 3).
+    let rows = stats::aircraft_sorted(&db, &q.sort, &q.dir, &q.q, u32::MAX, 0)?;
     Ok(Json(serde_json::to_value(rows)?))
 }
 
