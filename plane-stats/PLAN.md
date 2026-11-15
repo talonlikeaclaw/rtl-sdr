@@ -21,13 +21,11 @@ Built and working:
 - Aircraft profile page (visits, callsigns, records, enrichment).
 - OpenSky registration/type enrichment.
 - Emergency squawk log.
-- tar1090 deep links (`?icao=<hex>`, `?showTrace=<hex>`).
-
-Step 1 is implemented but may be uncommitted:
-
-- `tar1090_base()` in `web.rs` (`TAR1090_URL` env, else request `Host` :8080).
-- `AircraftRow::map_url()` / `trace_url()`.
-- `Map` column in the fleet table; map/trace pills on the profile.
+- tar1090 deep links: `tar1090_base()` in `web.rs` (`TAR1090_URL` env, else
+  request `Host` :8080), `AircraftRow::map_url()` / `trace_url()`, `Map` column
+  in the fleet table, map/trace pills on the profile.
+- Live "overhead now" panel: current alt/speed/climb/range/bearing/age from the
+  `last_*` columns, `/partials/live` + `/api/live`, 5 s htmx refresh.
 
 Known loose ends:
 
@@ -253,8 +251,8 @@ re-notify; denied permission leaves the page functional.
 
 | Step | Status | Commit |
 |---|---|---|
-| 1. Deep links | implemented, uncommitted | — |
-| 2. Live panel | pending | — |
+| 1. Deep links | done | 047272d |
+| 2. Live panel | done | `plane-stats: live overhead panel with current state` |
 | 3. Pagination | pending | — |
 | 4. Filters | pending | — |
 | 5. `day_aircraft` + `/today` | pending | — |

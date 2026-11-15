@@ -110,6 +110,11 @@ fn main() {
         ("enrichment", "engines", "TEXT"),
         ("enrichment", "notes", "TEXT"),
         ("enrichment", "categorydescription", "TEXT"),
+        ("aircraft", "last_alt_ft", "INTEGER"),
+        ("aircraft", "last_gs_kts", "REAL"),
+        ("aircraft", "last_range_nm", "REAL"),
+        ("aircraft", "last_baro_rate", "REAL"),
+        ("aircraft", "last_msg_age", "REAL"),
     ];
     for (table, col, ddl) in NEW_COLUMNS {
         if let Err(e) = conn.execute(&format!("ALTER TABLE {table} ADD COLUMN {col} {ddl}"), []) {
@@ -128,6 +133,14 @@ fn main() {
     }
 
     let db: Db = Arc::new(Mutex::new(conn));
+
+    match (
+        std::env::var("RX_LAT").ok().and_then(|v| v.trim().parse::<f64>().ok()),
+        std::env::var("RX_LON").ok().and_then(|v| v.trim().parse::<f64>().ok()),
+    ) {
+        (Some(lat), Some(lon)) => stats::set_rx_pos(lat, lon),
+        _ => tracing::warn!("RX_LAT/RX_LON not set; bearing column disabled"),
+    }
 
     match enrichment::load(&db) {
         Ok(enrichment::Outcome::Loaded(n)) => tracing::info!("loaded {n} enrichment rows"),

@@ -31,6 +31,11 @@ pub struct AircraftRow {
     pub last_emergency: Option<String>,
     pub registration: Option<String>,
     pub typecode: Option<String>,
+    pub last_alt_ft: Option<i64>,
+    pub last_gs_kts: Option<f64>,
+    pub last_range_nm: Option<f64>,
+    pub last_baro_rate: Option<f64>,
+    pub last_msg_age: Option<f64>,
 }
 
 fn row_to_aircraft(r: &Row) -> rusqlite::Result<AircraftRow> {
@@ -56,6 +61,11 @@ fn row_to_aircraft(r: &Row) -> rusqlite::Result<AircraftRow> {
         last_emergency: r.get(18)?,
         registration: r.get(19)?,
         typecode: r.get(20)?,
+        last_alt_ft: r.get(21)?,
+        last_gs_kts: r.get(22)?,
+        last_range_nm: r.get(23)?,
+        last_baro_rate: r.get(24)?,
+        last_msg_age: r.get(25)?,
     })
 }
 
@@ -108,6 +118,50 @@ impl AircraftRow {
     pub fn trace_url(&self, base: &str) -> String {
         format!("{base}/?showTrace={}", self.hex)
     }
+    pub fn alt_str(&self) -> String {
+        self.last_alt_ft.map(|v| v.to_string()).unwrap_or_else(|| "-".into())
+    }
+    pub fn gs_str(&self) -> String {
+        self.last_gs_kts.map(|v| format!("{v:.0}")).unwrap_or_else(|| "-".into())
+    }
+    pub fn range_str(&self) -> String {
+        self.last_range_nm.map(|v| format!("{v:.1}")).unwrap_or_else(|| "-".into())
+    }
+    pub fn climb_str(&self) -> String {
+        self.last_baro_rate.map(|v| format!("{v:+.0}")).unwrap_or_else(|| "-".into())
+    }
+    pub fn age_str(&self) -> String {
+        self.last_msg_age.map(|v| format!("{v:.0}")).unwrap_or_else(|| "-".into())
+    }
+    /// Compass bearing from the receiver to this aircraft, if both positions are known.
+    pub fn bearing_str(&self, rx: &Option<(f64, f64)>) -> String {
+        match (rx, self.last_lat, self.last_lon) {
+            (Some((rx_lat, rx_lon)), Some(lat), Some(lon)) => {
+                format!("{:.0}\u{00b0}", bearing_deg(*rx_lat, *rx_lon, lat, lon))
+            }
+            _ => "-".into(),
+        }
+    }
+}
+
+/// Receiver position, set once at startup from `RX_LAT`/`RX_LON`.
+static RX_POS: std::sync::OnceLock<(f64, f64)> = std::sync::OnceLock::new();
+
+pub fn set_rx_pos(lat: f64, lon: f64) {
+    let _ = RX_POS.set((lat, lon));
+}
+
+pub fn rx_pos() -> Option<(f64, f64)> {
+    RX_POS.get().copied()
+}
+
+/// Initial great-circle bearing from (rx_lat, rx_lon) to (lat, lon), in degrees 0-360.
+pub fn bearing_deg(rx_lat: f64, rx_lon: f64, lat: f64, lon: f64) -> f64 {
+    let (phi1, phi2) = (rx_lat.to_radians(), lat.to_radians());
+    let d_lambda = (lon - rx_lon).to_radians();
+    let y = d_lambda.sin() * phi2.cos();
+    let x = phi1.cos() * phi2.sin() - phi1.sin() * phi2.cos() * d_lambda.cos();
+    (y.atan2(x).to_degrees() + 360.0) % 360.0
 }
 
 impl Record {
@@ -149,7 +203,8 @@ const COLS: &str = "a.hex, a.first_seen, a.last_seen, a.sightings, a.last_flight
                     a.last_category, a.max_alt_ft, a.max_gs_kts, a.max_range_nm, a.max_rssi_dbfs, \
                     a.last_lat, a.last_lon, a.last_track, a.max_baro_rate, a.min_baro_rate, \
                     a.last_nav_alt_ft, a.last_nav_heading, a.last_emergency, \
-                    e.registration, e.typecode";
+                    e.registration, e.typecode, \
+                    a.last_alt_ft, a.last_gs_kts, a.last_range_nm, a.last_baro_rate, a.last_msg_age";
 const FROM: &str = "FROM aircraft a LEFT JOIN enrichment e ON e.icao24 = a.hex";
 
 /// Whitelist sort keys -> (SQL column, default direction).
@@ -204,6 +259,19 @@ pub fn recent_arrivals(db: &Db) -> rusqlite::Result<Vec<AircraftRow>> {
         "SELECT {COLS} {FROM} ORDER BY a.first_seen DESC LIMIT 10"
     ))?;
     let rows = stmt.query_map([], row_to_aircraft)?;
+    rows.collect()
+}
+
+/// Aircraft still on the tar1090 map, nearest first (unpositioned last).
+pub fn live_aircraft(db: &Db, now: f64) -> rusqlite::Result<Vec<AircraftRow>> {
+    let conn = db.lock().expect("db mutex");
+    let mut stmt = conn.prepare(&format!(
+        "SELECT {COLS} {FROM}
+         WHERE a.last_seen > ?1
+         ORDER BY a.last_range_nm IS NULL, a.last_range_nm ASC
+         LIMIT 50"
+    ))?;
+    let rows = stmt.query_map(params![now - LIVE_WINDOW_SECS], row_to_aircraft)?;
     rows.collect()
 }
 

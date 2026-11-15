@@ -1,0 +1,36 @@
+<table>
+  <thead>
+    <tr>
+      <th>Callsign</th>
+      <th>Type</th>
+      <th>Alt (ft)</th>
+      <th>Speed (kt)</th>
+      <th>Climb (fpm)</th>
+      <th>Range (nm)</th>
+      <th>Bearing</th>
+      <th>Age (s)</th>
+      <th>Map</th>
+    </tr>
+  </thead>
+  <tbody>
+    {% if rows.is_empty() %}
+    <tr><td colspan="9">Nothing overhead right now.</td></tr>
+    {% endif %}
+    {% for a in rows %}
+    <tr>
+      <td><a href="/aircraft/{{ a.hex }}">{% if let Some(cs) = a.last_flight %}{{ cs }}{% else %}{{ a.hex }}{% endif %}</a></td>
+      <td class="mono">{% if let Some(v) = a.typecode %}{{ v }}{% else %}-{% endif %}</td>
+      <td>{{ a.alt_str() }}</td>
+      <td>{{ a.gs_str() }}</td>
+      <td>{{ a.climb_str() }}</td>
+      <td>{{ a.range_str() }}</td>
+      <td>{{ a.bearing_str(rx) }}</td>
+      <td>{{ a.age_str() }}</td>
+      <td class="links">
+        <a href="{{ a.map_url(tar1090.as_str()) }}" target="_blank" rel="noopener">map</a>
+        <a href="{{ a.trace_url(tar1090.as_str()) }}" target="_blank" rel="noopener">trace</a>
+      </td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>

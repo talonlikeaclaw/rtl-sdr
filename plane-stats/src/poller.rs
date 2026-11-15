@@ -99,8 +99,10 @@ fn record_poll(db: &Db, now: f64, live: &[&Aircraft], messages: i64) -> rusqlite
                 max_alt_ft, max_gs_kts, max_range_nm, max_rssi_dbfs,
                 last_lat, last_lon, last_track,
                 max_baro_rate, min_baro_rate,
-                last_nav_alt_ft, last_nav_heading, last_emergency)
-             VALUES (?1, ?2, ?2, 1, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?13, ?14, ?15, ?16)
+                last_nav_alt_ft, last_nav_heading, last_emergency,
+                last_alt_ft, last_gs_kts, last_range_nm, last_baro_rate, last_msg_age)
+             VALUES (?1, ?2, ?2, 1, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?13, ?14, ?15, ?16,
+                     ?17, ?7, ?8, ?13, ?18)
              ON CONFLICT(hex) DO UPDATE SET
                last_seen = excluded.last_seen,
                sightings = aircraft.sightings + 1,
@@ -113,6 +115,11 @@ fn record_poll(db: &Db, now: f64, live: &[&Aircraft], messages: i64) -> rusqlite
                last_nav_alt_ft = coalesce(excluded.last_nav_alt_ft, aircraft.last_nav_alt_ft),
                last_nav_heading = coalesce(excluded.last_nav_heading, aircraft.last_nav_heading),
                last_emergency = coalesce(excluded.last_emergency, aircraft.last_emergency),
+               last_alt_ft = excluded.last_alt_ft,
+               last_gs_kts = excluded.last_gs_kts,
+               last_range_nm = excluded.last_range_nm,
+               last_baro_rate = excluded.last_baro_rate,
+               last_msg_age = excluded.last_msg_age,
                max_alt_ft = nullif(MAX(ifnull(aircraft.max_alt_ft, -2147483648),
                                        ifnull(excluded.max_alt_ft, -2147483648)), -2147483648),
                max_gs_kts = nullif(MAX(ifnull(aircraft.max_gs_kts, -1e30),
@@ -153,6 +160,13 @@ fn record_poll(db: &Db, now: f64, live: &[&Aircraft], messages: i64) -> rusqlite
                 Some(Alt::Ground(_)) => None,
                 None => None,
             };
+            // Current altitude for the live panel: ground counts as 0 ft, while
+            // `max_alt_ft` above keeps ignoring ground contacts.
+            let last_alt_ft = match &a.alt_baro {
+                Some(Alt::Ft(ft)) => Some(*ft as i64),
+                Some(Alt::Ground(_)) => Some(0),
+                None => None,
+            };
             let flight = a.flight.as_deref().map(str::trim).filter(|s| !s.is_empty());
             stmt.execute(params![
                 a.hex.to_lowercase(),
@@ -171,6 +185,8 @@ fn record_poll(db: &Db, now: f64, live: &[&Aircraft], messages: i64) -> rusqlite
                 a.nav_altitude_mcp.map(|v| v as i64),
                 a.nav_heading,
                 a.emergency,
+                last_alt_ft,
+                a.seen,
             ])?;
 
             let emergency_str = a.emergency.as_deref().filter(|e| *e != "none");

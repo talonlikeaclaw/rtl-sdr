@@ -99,7 +99,10 @@ docker compose --profile adsb build plane-stats
 ## plane-stats status
 
 Built: aircraft profile page (visits, callsigns, records), OpenSky
-registration/type enrichment, emergency squawk log, tar1090 map/trace deep links.
+registration/type enrichment, emergency squawk log, tar1090 map/trace deep
+links, live "overhead now" panel (current alt/speed/climb/range/bearing/age from
+the `last_*` columns; `/partials/live` + `/api/live`, 5 s htmx refresh; bearing
+needs `RX_LAT`/`RX_LON`, wired from `READSB_LAT`/`READSB_LON` in compose).
 
 Detailed step-by-step plan for the remaining work: `plane-stats/PLAN.md`.
 

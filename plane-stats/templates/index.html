@@ -41,6 +41,15 @@
         </div>
       </section>
 
+      <section class="glass panel" aria-label="Overhead now">
+        <h2>Overhead now</h2>
+        <div class="table-wrap">
+          <div id="live" hx-get="/partials/live" hx-trigger="every 5s">
+            {% include "partials/live.html" %}
+          </div>
+        </div>
+      </section>
+
       <section class="glass panel" aria-label="All-time fleet">
         <h2>All-time fleet</h2>
         <input id="fleet-search" class="search" type="search" name="q" value="{{ q }}"

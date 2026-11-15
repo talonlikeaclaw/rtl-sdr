@@ -20,8 +20,10 @@ pub fn router(db: Db) -> Router {
         .route("/partials/table", get(table_partial))
         .route("/partials/cards", get(cards_partial))
         .route("/partials/emergencies", get(emergencies_partial))
+        .route("/partials/live", get(live_partial))
         .route("/api/aircraft", get(api_aircraft))
         .route("/api/emergencies", get(api_emergencies))
+        .route("/api/live", get(api_live))
         .route("/api/stats", get(api_stats))
         .route("/htmx.min.js", get(htmx_js))
         .route("/app.css", get(app_css))
@@ -83,6 +85,7 @@ struct IndexTemplate {
     q: String,
     tar1090: String,
     now: f64,
+    rx: Option<(f64, f64)>,
 }
 
 async fn index(
@@ -112,6 +115,7 @@ async fn index(
             q: q.q.clone(),
             tar1090: tar1090_base(&headers),
             now,
+            rx: stats::rx_pos(),
         }
         .render()?,
     ))
@@ -172,6 +176,30 @@ struct EmergenciesTemplate {
 
 async fn emergencies_partial(State(db): State<Db>) -> Result<Html<String>, AppError> {
     Ok(Html(EmergenciesTemplate { emergencies: stats::emergency_log(&db, 20)? }.render()?))
+}
+
+#[derive(Template)]
+#[template(path = "partials/live.html")]
+struct LiveTemplate {
+    rows: Vec<AircraftRow>,
+    tar1090: String,
+    rx: Option<(f64, f64)>,
+}
+
+async fn live_partial(State(db): State<Db>, headers: HeaderMap) -> Result<Html<String>, AppError> {
+    let now = now();
+    Ok(Html(
+        LiveTemplate {
+            rows: stats::live_aircraft(&db, now)?,
+            tar1090: tar1090_base(&headers),
+            rx: stats::rx_pos(),
+        }
+        .render()?,
+    ))
+}
+
+async fn api_live(State(db): State<Db>) -> Result<Json, AppError> {
+    Ok(Json(serde_json::to_value(stats::live_aircraft(&db, now())?)?))
 }
 
 #[derive(Deserialize, Default)]

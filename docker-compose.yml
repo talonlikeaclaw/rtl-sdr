@@ -64,6 +64,9 @@ services:
       TZ: ${TZ}
       # Browser-facing tar1090 base; empty = derive from the request Host (:8080).
       TAR1090_URL: ${TAR1090_URL:-}
+      # Receiver position for the live panel's bearing column.
+      RX_LAT: ${READSB_LAT}
+      RX_LON: ${READSB_LON}
 
 volumes:
   readsb_rrd:
