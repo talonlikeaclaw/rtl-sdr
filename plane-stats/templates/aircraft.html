@@ -29,7 +29,14 @@
           </p>
         </div>
       </div>
-      <a class="pill" href="/">← Fleet</a>
+      <div class="hero-actions">
+        <a class="pill" href="{{ tar1090 }}/" target="_blank" rel="noopener">Open live map</a>
+        {% if row.is_live(now) %}
+        <a class="pill" href="{{ row.map_url(tar1090.as_str()) }}" target="_blank" rel="noopener">Show on map</a>
+        <a class="pill" href="{{ row.trace_url(tar1090.as_str()) }}" target="_blank" rel="noopener">Show trace</a>
+        {% endif %}
+        <a class="pill" href="/">← Fleet</a>
+      </div>
     </header>
 
     <main>

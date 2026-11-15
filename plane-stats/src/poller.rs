@@ -6,7 +6,6 @@ use serde::Deserialize;
 use crate::Db;
 
 const POLL_INTERVAL: Duration = Duration::from_secs(10);
-const LIVE_SEEN_MAX: f64 = 60.0;
 const VISIT_GAP_SECS: f64 = 600.0;
 const PRUNE_AFTER_DAYS: f64 = 90.0;
 
@@ -62,7 +61,7 @@ pub async fn run(db: Db, source: String) {
                     let live: Vec<&Aircraft> = payload
                         .aircraft
                         .iter()
-                        .filter(|a| a.seen.unwrap_or(f64::MAX) <= LIVE_SEEN_MAX)
+                        .filter(|a| a.seen.unwrap_or(f64::MAX) <= crate::stats::LIVE_WINDOW_SECS)
                         .collect();
                     match record_poll(&db, now, &live, payload.messages) {
                         Ok(()) => tracing::info!(

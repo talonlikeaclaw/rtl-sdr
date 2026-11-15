@@ -1,6 +1,6 @@
 use askama::Template;
 use axum::extract::{Query, State};
-use axum::http::{header, StatusCode};
+use axum::http::{header, HeaderMap, StatusCode};
 use axum::response::{Html, IntoResponse, Response};
 use axum::routing::get;
 use axum::Router;
@@ -35,6 +35,36 @@ fn now() -> f64 {
         .as_secs_f64()
 }
 
+/// Base URL of the tar1090 instance, as seen by the browser.
+///
+/// `TAR1090_URL` wins when set (reverse proxy, https, different host). Otherwise
+/// derive it from the request's `Host` header, swapping the port to 8080, so a
+/// page opened at `pi.local:8081` links to `pi.local:8080`.
+fn tar1090_base(headers: &HeaderMap) -> String {
+    if let Ok(url) = std::env::var("TAR1090_URL") {
+        let url = url.trim();
+        if !url.is_empty() {
+            return url.trim_end_matches('/').to_string();
+        }
+    }
+    let host = headers.get(header::HOST).and_then(|v| v.to_str().ok()).unwrap_or("localhost");
+    format!("http://{}:8080", strip_port(host))
+}
+
+/// `host:port` -> `host`, keeping IPv6 literals intact (`[::1]:8081` -> `[::1]`).
+fn strip_port(host: &str) -> &str {
+    if let Some(rest) = host.strip_prefix('[') {
+        return match rest.find(']') {
+            Some(end) => &host[..end + 2],
+            None => host,
+        };
+    }
+    match host.rsplit_once(':') {
+        Some((h, port)) if !h.is_empty() && port.chars().all(|c| c.is_ascii_digit()) => h,
+        _ => host,
+    }
+}
+
 fn ts(epoch: f64) -> String {
     chrono::DateTime::from_timestamp(epoch as i64, 0).expect("valid ts").with_timezone(&chrono::Local)
         .format("%Y-%m-%d %H:%M:%S")
@@ -51,9 +81,15 @@ struct IndexTemplate {
     sort: String,
     dir: String,
     q: String,
+    tar1090: String,
+    now: f64,
 }
 
-async fn index(State(db): State<Db>, Query(q): Query<SortParams>) -> Result<Html<String>, AppError> {
+async fn index(
+    State(db): State<Db>,
+    Query(q): Query<SortParams>,
+    headers: HeaderMap,
+) -> Result<Html<String>, AppError> {
     let sort = if q.sort.is_empty() { "last_seen".to_string() } else { q.sort.clone() };
     let dir = if stats::is_valid_dir(&q.dir) {
         q.dir.clone()
@@ -61,12 +97,23 @@ async fn index(State(db): State<Db>, Query(q): Query<SortParams>) -> Result<Html
         stats::sort_column(&sort).1.to_string()
     };
     let rows = stats::aircraft_sorted(&db, &sort, &dir, &q.q)?;
-    let st = stats::stats(&db, now())?;
+    let now = now();
+    let st = stats::stats(&db, now)?;
     let recent = stats::recent_arrivals(&db)?;
     let emergencies = stats::emergency_log(&db, 20)?;
     Ok(Html(
-        IndexTemplate { stats: st, rows, recent, emergencies, sort, dir, q: q.q.clone() }
-            .render()?,
+        IndexTemplate {
+            stats: st,
+            rows,
+            recent,
+            emergencies,
+            sort,
+            dir,
+            q: q.q.clone(),
+            tar1090: tar1090_base(&headers),
+            now,
+        }
+        .render()?,
     ))
 }
 
@@ -86,11 +133,14 @@ struct TableTemplate {
     sort: String,
     dir: String,
     q: String,
+    tar1090: String,
+    now: f64,
 }
 
 async fn table_partial(
     State(db): State<Db>,
     Query(q): Query<SortParams>,
+    headers: HeaderMap,
 ) -> Result<Html<String>, AppError> {
     let rows = stats::aircraft_sorted(&db, &q.sort, &q.dir, &q.q)?;
     let sort = if q.sort.is_empty() { "last_seen".to_string() } else { q.sort.clone() };
@@ -99,7 +149,9 @@ async fn table_partial(
     } else {
         stats::sort_column(&sort).1.to_string()
     };
-    Ok(Html(TableTemplate { rows, sort, dir, q: q.q }.render()?))
+    Ok(Html(
+        TableTemplate { rows, sort, dir, q: q.q, tar1090: tar1090_base(&headers), now: now() }.render()?,
+    ))
 }
 
 #[derive(Template)]
@@ -148,6 +200,8 @@ struct AircraftTemplate {
     enrich: Option<stats::Enrichment>,
     callsigns: Vec<stats::CallsignRow>,
     visits: Vec<VisitView>,
+    tar1090: String,
+    now: f64,
 }
 
 struct VisitView {
@@ -181,6 +235,7 @@ fn fmt_duration(secs: f64) -> String {
 async fn aircraft_profile(
     State(db): State<Db>,
     axum::extract::Path(hex): axum::extract::Path<String>,
+    headers: HeaderMap,
 ) -> Result<Html<String>, AppError> {
     let hex = hex.to_lowercase();
     let Some(row) = stats::aircraft_by_hex(&db, &hex)? else {
@@ -197,7 +252,17 @@ async fn aircraft_profile(
             duration: fmt_duration(v.end_ts - v.start_ts),
         })
         .collect();
-    Ok(Html(AircraftTemplate { row, enrich, callsigns, visits }.render()?))
+    Ok(Html(
+        AircraftTemplate {
+            row,
+            enrich,
+            callsigns,
+            visits,
+            tar1090: tar1090_base(&headers),
+            now: now(),
+        }
+        .render()?,
+    ))
 }
 
 async fn api_aircraft_hex(

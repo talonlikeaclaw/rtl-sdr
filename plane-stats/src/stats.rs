@@ -3,6 +3,11 @@ use rusqlite::{params, Connection, OptionalExtension, Row};
 
 use crate::Db;
 
+/// An aircraft is "live" (still on the tar1090 map) when the poller recorded
+/// it within this window. The poller only ingests tar1090 entries whose
+/// `seen` age is at most this value, so the two stay in sync.
+pub const LIVE_WINDOW_SECS: f64 = 60.0;
+
 #[derive(Debug, serde::Serialize)]
 pub struct AircraftRow {
     pub hex: String,
@@ -86,6 +91,22 @@ impl AircraftRow {
     }
     pub fn emergency_active(&self) -> bool {
         matches!(self.last_emergency.as_deref(), Some(e) if e != "none")
+    }
+    /// Whether tar1090 still has this aircraft on its live map.
+    pub fn is_live(&self, now: &f64) -> bool {
+        *now - self.last_seen <= LIVE_WINDOW_SECS
+    }
+    /// tar1090 deep link that selects this aircraft on the live map.
+    ///
+    /// No `hideSidebar`: tar1090 persists that flag in its own localStorage, so a
+    /// link from here would permanently change the user's tar1090 layout. tar1090
+    /// also strips consumed params from the URL.
+    pub fn map_url(&self, base: &str) -> String {
+        format!("{base}/?icao={}", self.hex)
+    }
+    /// tar1090 deep link that shows this aircraft's track history.
+    pub fn trace_url(&self, base: &str) -> String {
+        format!("{base}/?showTrace={}", self.hex)
     }
 }
 

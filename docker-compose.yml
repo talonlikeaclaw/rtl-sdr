@@ -62,6 +62,8 @@ services:
       - "8081:8081"
     environment:
       TZ: ${TZ}
+      # Browser-facing tar1090 base; empty = derive from the request Host (:8080).
+      TAR1090_URL: ${TAR1090_URL:-}
 
 volumes:
   readsb_rrd:

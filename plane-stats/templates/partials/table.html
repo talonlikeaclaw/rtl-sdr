@@ -33,6 +33,7 @@
       <th class="{% if sort == "max_range_nm" %}active {{ dir }}{% endif %}"
           hx-get="/partials/table?sort=max_range_nm&dir={% if sort == "max_range_nm" && dir == "desc" %}asc{% else %}desc{% endif %}&q={{ q }}"
           hx-target="#fleet">Max range (nm)</th>
+      <th>Map</th>
     </tr>
   </thead>
   <tbody>
@@ -50,6 +51,12 @@
       <td>{% if let Some(v) = a.max_alt_ft %}{{ v }}{% else %}-{% endif %}</td>
       <td>{% if let Some(v) = a.max_gs_kts %}{{ v }}{% else %}-{% endif %}</td>
       <td>{% if let Some(v) = a.max_range_nm %}{{ v }}{% else %}-{% endif %}</td>
+      <td class="links">
+        {% if a.is_live(now) %}
+        <a href="{{ a.map_url(tar1090.as_str()) }}" target="_blank" rel="noopener">map</a>
+        <a href="{{ a.trace_url(tar1090.as_str()) }}" target="_blank" rel="noopener">trace</a>
+        {% else %}-{% endif %}
+      </td>
     </tr>
     {% endfor %}
   </tbody>

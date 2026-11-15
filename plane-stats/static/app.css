@@ -449,3 +449,20 @@ input.search {
 }
 input.search::placeholder { color: var(--muted); }
 input.search:focus { border-color: var(--accent-dim); }
+
+/* tar1090 deep links */
+.hero-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+td.links a {
+  color: var(--accent);
+  text-decoration: none;
+  font-size: 0.78rem;
+  margin-right: 0.6rem;
+}
+
+td.links a:last-child { margin-right: 0; }
+td.links a:hover { text-decoration: underline; }

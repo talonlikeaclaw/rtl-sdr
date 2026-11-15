@@ -74,6 +74,10 @@ fn main() {
            owner TEXT,
            operator TEXT
          );
+         CREATE TABLE IF NOT EXISTS enrichment_meta (
+           key TEXT PRIMARY KEY,
+           value TEXT NOT NULL
+         );
          CREATE TABLE IF NOT EXISTS emergency_log (
            ts REAL NOT NULL,
            hex TEXT NOT NULL,
@@ -126,7 +130,10 @@ fn main() {
     let db: Db = Arc::new(Mutex::new(conn));
 
     match enrichment::load(&db) {
-        Ok(n) => tracing::info!("loaded {n} enrichment rows"),
+        Ok(enrichment::Outcome::Loaded(n)) => tracing::info!("loaded {n} enrichment rows"),
+        Ok(enrichment::Outcome::Unchanged(n)) => {
+            tracing::info!("enrichment unchanged ({n} rows), skipping reload")
+        }
         Err(e) => tracing::warn!("enrichment load failed: {e}"),
     }
 
