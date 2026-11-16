@@ -30,15 +30,15 @@
           <p class="tagline">{{ summary.day }} · everything the receiver heard since local midnight.<span class="meta">ADS-B</span></p>
         </div>
       </div>
-      <div class="hero-actions">
+      <nav class="hero-actions" aria-label="Primary">
         <a class="pill" href="/">← Dashboard</a>
         <a class="pill" href="/activity">Activity</a>
         <a class="pill" href="{{ tar1090 }}/" target="_blank" rel="noopener">Open live map</a>
-      </div>
+      </nav>
     </header>
 
     <main id="main">
-      <section class="glass panel" aria-label="Today at a glance">
+      <section class="glass panel" aria-label="At a glance">
         <h2>At a glance</h2>
         <div class="card-group">
           <div class="cards">
@@ -49,13 +49,13 @@
             </div>
             <div class="card">
               <div class="num">{{ summary.new }}</div>
-              <div class="sub">new to me</div>
+              <div class="sub">new today</div>
               <div class="who">first time ever seen today</div>
             </div>
             <div class="card">
               <div class="num">{% if let Some(v) = summary.peak_airborne %}{{ v }}{% else %}-{% endif %}</div>
               <div class="sub">peak overhead</div>
-              <div class="who">across {{ summary.polls }} polls</div>
+              <div class="who">across {{ summary.polls }} poll cycles</div>
             </div>
             <div class="card">
               <div class="num">{{ summary.messages }}</div>
@@ -72,7 +72,7 @@
           <table>
             <caption class="sr-only">Today's records against the best prior day</caption>
             <thead>
-              <tr><th scope="col">Metric</th><th scope="col">Today</th><th scope="col">Previous best</th><th scope="col">Holder</th><th scope="col">Status</th></tr>
+              <tr><th scope="col">Metric</th><th scope="col">Today</th><th scope="col">Previous best</th><th scope="col">Aircraft</th><th scope="col">Status</th></tr>
             </thead>
             <tbody>
               {% for r in records %}
@@ -85,15 +85,15 @@
               </tr>
               {% endfor %}
               {% if records.is_empty() %}
-              <tr><td colspan="5">No fixes with altitude, speed, or range yet today.</td></tr>
+              <tr><td colspan="5">No aircraft has reported altitude, speed or range today.</td></tr>
               {% endif %}
             </tbody>
           </table>
         </div>
       </section>
 
-      <section class="glass panel" aria-label="Traffic by hour">
-        <h2>Traffic by hour</h2>
+      <section class="glass panel" aria-label="Peak overhead by hour">
+        <h2>Peak overhead by hour</h2>
         <div class="hist-chart">
           <div class="hist-y" aria-hidden="true">
             {% if hours_max > 0 %}
@@ -117,8 +117,8 @@
         </div>
       </section>
 
-      <section class="glass panel" aria-label="New to me today">
-        <h2>New to me today</h2>
+      <section class="glass panel" aria-label="New today">
+        <h2>New today</h2>
         <div class="table-wrap">
           <table>
             <caption class="sr-only">Aircraft heard for the first time today</caption>
@@ -136,7 +136,7 @@
               </tr>
               {% endfor %}
               {% if new.is_empty() %}
-              <tr><td colspan="5">No aircraft new to the receiver today.</td></tr>
+              <tr><td colspan="5">No new aircraft today.</td></tr>
               {% endif %}
             </tbody>
           </table>

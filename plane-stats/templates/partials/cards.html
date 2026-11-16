@@ -3,7 +3,7 @@
   <div class="cards">
     <div class="card">
       <div class="num">{{ stats.currently_airborne }}</div>
-      <div class="sub">visible now</div>
+      <div class="sub">overhead now</div>
       <div class="who">{{ stats.airborne_trend() }}</div>
     </div>
     <div class="card">
@@ -30,25 +30,25 @@
     <div class="card">
       <div class="num">{{ stats.types_seen }}</div>
       <div class="sub">aircraft types</div>
-      <div class="who">{% if let Some(r) = stats.top_type %}top {{ r.hex }} · {{ r.value_str() }}{% else %}no types yet{% endif %}</div>
+      <div class="who">{% if let Some(r) = stats.top_type %}top {{ r.hex }} · {{ r.value_str() }} aircraft{% else %}no types yet{% endif %}</div>
     </div>
     <div class="card">
       <div class="num">{% if let Some(r) = stats.top_airframe %}{{ r.value_str() }} <span class="unit">polls</span>{% else %}-{% endif %}</div>
-      <div class="sub">most tracked</div>
+      <div class="sub">most heard</div>
       <div class="who">{% if let Some(r) = stats.top_airframe %}<a href="/aircraft/{{ r.hex }}">{{ r.ident() }}</a>{% else %}no regulars yet{% endif %}</div>
     </div>
     <div class="card">
-      <div class="num">{% if let Some(r) = stats.top_operator %}{{ r.value_str() }}{% else %}-{% endif %}</div>
+      <div class="num">{% if let Some(r) = stats.top_operator %}{{ r.value_str() }} <span class="unit">aircraft</span>{% else %}-{% endif %}</div>
       <div class="sub">top operator</div>
       <div class="who">{% if let Some(r) = stats.top_operator %}{{ r.hex }}{% else %}no operator data{% endif %}</div>
     </div>
     <div class="card">
-      <div class="num">{% if let Some(r) = stats.busiest_hour %}{{ r.value_str() }}{% else %}-{% endif %}</div>
+      <div class="num">{% if let Some(r) = stats.busiest_hour %}{{ r.value_str() }} <span class="unit">aircraft</span>{% else %}-{% endif %}</div>
       <div class="sub">busiest hour</div>
       <div class="who">{% if let Some(r) = stats.busiest_hour %}{{ r.label() }}{% else %}no polls yet{% endif %}</div>
     </div>
     <div class="card">
-      <div class="num">{% if let Some(r) = stats.busiest_day %}{{ r.value_str() }}{% else %}-{% endif %}</div>
+      <div class="num">{% if let Some(r) = stats.busiest_day %}{{ r.value_str() }} <span class="unit">aircraft</span>{% else %}-{% endif %}</div>
       <div class="sub">busiest day</div>
       <div class="who">{% if let Some(r) = stats.busiest_day %}{{ r.label_day() }}{% else %}no polls yet{% endif %}</div>
     </div>
@@ -60,23 +60,23 @@
   <div class="cards">
     <div class="card">
       <div class="num">{% if let Some(r) = stats.max_range %}{{ r.value_str() }} <span class="unit">nm</span>{% else %}-{% endif %}</div>
-      <div class="sub">range record</div>
-      <div class="who">{% if let Some(r) = stats.max_range %}<a href="/aircraft/{{ r.hex }}">{{ r.ident() }}</a>{% else %}waiting for a fix{% endif %}</div>
+      <div class="sub">max range</div>
+      <div class="who">{% if let Some(r) = stats.max_range %}<a href="/aircraft/{{ r.hex }}">{{ r.ident() }}</a>{% else %}no data yet{% endif %}</div>
     </div>
     <div class="card">
       <div class="num">{% if let Some(r) = stats.fastest %}{{ r.value_str() }} <span class="unit">kt</span>{% else %}-{% endif %}</div>
-      <div class="sub">speed record</div>
-      <div class="who">{% if let Some(r) = stats.fastest %}<a href="/aircraft/{{ r.hex }}">{{ r.ident() }}</a>{% else %}waiting for a fix{% endif %}</div>
+      <div class="sub">max speed</div>
+      <div class="who">{% if let Some(r) = stats.fastest %}<a href="/aircraft/{{ r.hex }}">{{ r.ident() }}</a>{% else %}no data yet{% endif %}</div>
     </div>
     <div class="card">
       <div class="num">{% if let Some(r) = stats.highest %}{{ r.value_str() }} <span class="unit">ft</span>{% else %}-{% endif %}</div>
-      <div class="sub">altitude record</div>
-      <div class="who">{% if let Some(r) = stats.highest %}<a href="/aircraft/{{ r.hex }}">{{ r.ident() }}</a>{% else %}waiting for a fix{% endif %}</div>
+      <div class="sub">max altitude</div>
+      <div class="who">{% if let Some(r) = stats.highest %}<a href="/aircraft/{{ r.hex }}">{{ r.ident() }}</a>{% else %}no data yet{% endif %}</div>
     </div>
     <div class="card">
       <div class="num">{% if let Some(r) = stats.strongest %}{{ r.value_str() }} <span class="unit">dBFS</span>{% else %}-{% endif %}</div>
       <div class="sub">strongest signal</div>
-      <div class="who">{% if let Some(r) = stats.strongest %}<a href="/aircraft/{{ r.hex }}">{{ r.ident() }}</a>{% else %}waiting for a fix{% endif %}</div>
+      <div class="who">{% if let Some(r) = stats.strongest %}<a href="/aircraft/{{ r.hex }}">{{ r.ident() }}</a>{% else %}no data yet{% endif %}</div>
     </div>
   </div>
 </div>

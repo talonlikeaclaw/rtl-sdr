@@ -382,6 +382,47 @@ the 25-column CSS grid is untouched, and each cell carries the full slot in its
 label ("Mon 14:00 · 5 aircraft") so the sparse hour header never has to be
 announced.
 
+## Copy
+
+The voice is night-watch quiet: plain sentences, no exclamation, no marketing. One
+operator reads this at a glance in a dark room, so every label names the thing it
+counts and the thing it does.
+
+### Glossary
+
+One noun per concept, everywhere. These are the words; anything else is a bug.
+
+| Word | Means | Never |
+|---|---|---|
+| **overhead** | heard within the last 60 s | visible, airborne, live (except the poller pill) |
+| **heard** | the receiver decoded a message from it; the verb for counts and states (`heard today`, `most heard`) | spotted, tracked |
+| **seen** | the ledger's record of when (`first seen`, `last seen`, `polls seen`, `not seen this week`) | as a verb for receiving |
+| **polls seen** | per-aircraft count of 10 s poll cycles (≈ airtime) | sightings, hits |
+| **poll cycle** | one pass of the poller over `aircraft.json` | poll, when a count of aircraft is nearby |
+| **new today** | first heard today, ever | new to me, new to the receiver |
+| **visit** | one continuous pass, split by a 5 min gap | session, flight |
+| **map** / **trace** | tar1090 deep links for a hex | trail, history, flight path |
+
+### Rules
+
+- **A numeral carries its unit.** `7` over `busiest hour` says nothing; `7 aircraft`
+  does. Cards put the unit in `<span class="unit">`, table headers put it in
+  parentheses (`Max alt (ft)`).
+- **Name the action, not the gesture.** `Open live map`, `Show trace`, `Clear all`.
+  A link's text must survive being read out of context, so table links carry an
+  `aria-label` with the hex: `Show c0603c trace`.
+- **An empty state says which kind of empty it is.** No filters and no rows is
+  `No aircraft recorded yet.`; filters with no match is `No aircraft match these
+  filters.`; a chart with no data names what will fill it.
+- **A missing value is `-`**, in tables and key-value lists alike. Not `unknown`,
+  not `n/a`.
+- **An error page is a page.** `templates/error.html` states what was not found,
+  what that implies, and the way back. A bare `unknown aircraft c0603c` body is not
+  an error message.
+- **Jargon stays where the audience owns it.** `squawk`, `hex`, `nm`, `kt`, `dBFS`,
+  `PIA`/`LADD` and `Cat` are the operator's own words. `fix` is not: it reads as a
+  repair. Say `position` or `data`.
+
 ## Do's and Don'ts
 
 ### Do:

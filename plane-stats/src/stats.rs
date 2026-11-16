@@ -377,10 +377,10 @@ impl FleetFilter {
             _ => {}
         }
         if let Some(v) = self.alt_min {
-            out.push(format!("max alt \u{2265} {v} ft"));
+            out.push(format!("max altitude \u{2265} {v} ft"));
         }
         if let Some(v) = self.alt_max {
-            out.push(format!("max alt \u{2264} {v} ft"));
+            out.push(format!("max altitude \u{2264} {v} ft"));
         }
         out
     }
@@ -1251,7 +1251,7 @@ impl Stats {
                 .to_string()
         })
     }
-    /// One-line trend for the "visible now" card.
+    /// One-line trend for the "overhead now" card.
     pub fn airborne_trend(&self) -> String {
         match self.avg_airborne_24h {
             Some(avg) if avg > 0.0 => {

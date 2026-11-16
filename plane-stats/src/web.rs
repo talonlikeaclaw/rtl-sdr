@@ -87,6 +87,8 @@ fn ts(epoch: f64) -> String {
 struct IndexTemplate {
     stats: Stats,
     rows: Vec<AircraftRow>,
+    /// Distinguishes "nothing matches these filters" from an empty ledger.
+    filtered: bool,
     live: Vec<AircraftRow>,
     recent: Vec<AircraftRow>,
     emergencies: Vec<stats::EmergencyRow>,
@@ -195,6 +197,7 @@ async fn index(
     Ok(Html(
         IndexTemplate {
             stats: st,
+            filtered: view.filter.is_active(),
             rows: view.rows,
             live,
             recent,
@@ -343,6 +346,8 @@ fn canonical_url(filter: &stats::FleetFilter, sort: &str, dir: &str, page: u32) 
 #[template(path = "partials/table.html")]
 struct TableTemplate {
     rows: Vec<AircraftRow>,
+    /// Distinguishes "nothing matches these filters" from an empty ledger.
+    filtered: bool,
     sort: String,
     dir: String,
     filter: stats::FleetFilter,
@@ -366,6 +371,7 @@ async fn table_partial(
     let view = fleet_view(&db, &q, now)?;
     let url = canonical_url(&view.filter, &view.sort, &view.dir, view.nav.page);
     let body = TableTemplate {
+        filtered: view.filter.is_active(),
         rows: view.rows,
         sort: view.sort,
         dir: view.dir,
@@ -402,6 +408,8 @@ struct TableRowsTemplate {
     rows: Vec<AircraftRow>,
     tar1090: String,
     now: f64,
+    /// Distinguishes "nothing matches these filters" from an empty ledger.
+    filtered: bool,
 }
 
 async fn table_rows_partial(
@@ -412,7 +420,13 @@ async fn table_rows_partial(
     let now = now();
     let view = fleet_view(&db, &q, now)?;
     Ok(Html(
-        TableRowsTemplate { rows: view.rows, tar1090: tar1090_base(&headers), now }.render()?,
+        TableRowsTemplate {
+            filtered: view.filter.is_active(),
+            rows: view.rows,
+            tar1090: tar1090_base(&headers),
+            now,
+        }
+        .render()?,
     ))
 }
 
@@ -558,6 +572,16 @@ async fn api_aircraft(State(db): State<Db>, Query(q): Query<SortParams>) -> Resu
     Ok(Json(serde_json::to_value(rows)?))
 }
 
+/// The one error surface: a dead link is a page, not a bare sentence.
+#[derive(Template)]
+#[template(path = "error.html")]
+struct ErrorTemplate {
+    title: &'static str,
+    message: String,
+    detail: &'static str,
+    tar1090: String,
+}
+
 #[derive(Template)]
 #[template(path = "aircraft.html")]
 struct AircraftTemplate {
@@ -601,10 +625,17 @@ async fn aircraft_profile(
     State(db): State<Db>,
     axum::extract::Path(hex): axum::extract::Path<String>,
     headers: HeaderMap,
-) -> Result<Html<String>, AppError> {
+) -> Result<Response, AppError> {
     let hex = hex.to_lowercase();
     let Some(row) = stats::aircraft_by_hex(&db, &hex)? else {
-        return Err(AppError(StatusCode::NOT_FOUND, format!("unknown aircraft {hex}")));
+        let body = ErrorTemplate {
+            title: "Not in the ledger",
+            message: format!("No aircraft with hex {hex}."),
+            detail: "The receiver has not logged this address. Check the hex, or search the fleet from the dashboard.",
+            tar1090: tar1090_base(&headers),
+        }
+        .render()?;
+        return Ok((StatusCode::NOT_FOUND, Html(body)).into_response());
     };
     let enrich = stats::enrichment_for(&db, &hex)?;
     let callsigns = stats::callsigns_for(&db, &hex)?;
@@ -627,7 +658,8 @@ async fn aircraft_profile(
             now: now(),
         }
         .render()?,
-    ))
+    )
+    .into_response())
 }
 
 async fn api_aircraft_hex(

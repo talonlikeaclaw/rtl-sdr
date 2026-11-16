@@ -13,8 +13,10 @@
       <td>{% if let Some(v) = a.max_range_nm %}{{ v }}{% else %}-{% endif %}</td>
       <td class="links">
         {% if a.is_live(now) %}
-        <a href="{{ a.map_url(tar1090.as_str()) }}" target="_blank" rel="noopener">map</a>
-        <a href="{{ a.trace_url(tar1090.as_str()) }}" target="_blank" rel="noopener">trace</a>
+        <a href="{{ a.map_url(tar1090.as_str()) }}" target="_blank" rel="noopener"
+           aria-label="Show {{ a.hex }} on the live map">map</a>
+        <a href="{{ a.trace_url(tar1090.as_str()) }}" target="_blank" rel="noopener"
+           aria-label="Show {{ a.hex }} trace">trace</a>
         {% else %}-{% endif %}
       </td>
     </tr>

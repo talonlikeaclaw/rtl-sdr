@@ -74,7 +74,7 @@
   {% if let Some(p) = prev_page %}
   <a class="pager-link" hx-get="/partials/table?sort={{ sort }}&dir={{ dir }}&page={{ p }}" hx-target="#fleet" hx-include="#fleet-controls">Prev</a>
   {% else %}<span class="pager-link disabled" aria-disabled="true">Prev</span>{% endif %}
-  <span class="pager-info">{% if total > 0 %}{{ from_row }}–{{ to_row }} of {{ total }}{% else %}no aircraft{% endif %} · page {{ page }} of {{ pages }}</span>
+  <span class="pager-info">{% if total > 0 %}{{ from_row }}–{{ to_row }} of {{ total }} · page {{ page }} of {{ pages }}{% else %}no aircraft{% endif %}</span>
   {% if let Some(p) = next_page %}
   <a class="pager-link" hx-get="/partials/table?sort={{ sort }}&dir={{ dir }}&page={{ p }}" hx-target="#fleet" hx-include="#fleet-controls">Next</a>
   {% else %}<span class="pager-link disabled" aria-disabled="true">Next</span>{% endif %}

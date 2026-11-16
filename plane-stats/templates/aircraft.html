@@ -31,23 +31,23 @@
           </p>
         </div>
       </div>
-      <div class="hero-actions">
+      <nav class="hero-actions" aria-label="Primary">
         <a class="pill" href="{{ tar1090 }}/" target="_blank" rel="noopener">Open live map</a>
         {% if row.is_live(now) %}
         <a class="pill" href="{{ row.map_url(tar1090.as_str()) }}" target="_blank" rel="noopener">Show on map</a>
         <a class="pill" href="{{ row.trace_url(tar1090.as_str()) }}" target="_blank" rel="noopener">Show trace</a>
         {% endif %}
-        <a class="pill" href="/">← Fleet</a>
-      </div>
+        <a class="pill" href="/">← Dashboard</a>
+      </nav>
     </header>
 
     <main id="main">
-      <section class="glass panel" aria-label="Owner">
+      <section class="glass panel" aria-label="Identity">
         <h2>Identity</h2>
         <div class="table-wrap">
           <table>
             <tbody>
-              <tr><th>Registration</th><td class="mono">{{ row.registration.as_deref().unwrap_or("unknown") }}</td></tr>
+              <tr><th>Registration</th><td class="mono">{{ row.registration.as_deref().unwrap_or("-") }}</td></tr>
               {% if let Some(m) = enrich %}
               <tr><th>Model</th><td>{{ m.model.as_deref().unwrap_or("-") }}{% if let Some(tc) = m.typecode %} ({{ tc }}){% endif %}</td></tr>
               <tr><th>Manufacturer</th><td>{{ m.manufacturer.as_deref().unwrap_or("-") }}</td></tr>
@@ -111,7 +111,7 @@
         <div class="table-wrap">
           <table>
             <thead>
-              <tr><th>Callsign</th><th>First seen</th><th>Last seen</th><th>Polls</th></tr>
+              <tr><th>Callsign</th><th>First seen</th><th>Last seen</th><th>Polls seen</th></tr>
             </thead>
             <tbody>
               {% for c in callsigns %}
@@ -135,7 +135,7 @@
         <div class="table-wrap">
           <table>
             <thead>
-              <tr><th>Start</th><th>End</th><th>Duration</th><th>Polls</th></tr>
+              <tr><th>Start</th><th>End</th><th>Duration</th><th>Polls seen</th></tr>
             </thead>
             <tbody>
               {% for v in visits %}

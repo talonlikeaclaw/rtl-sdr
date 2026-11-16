@@ -30,7 +30,7 @@
           <p class="tagline">Every aircraft heard on 1090&nbsp;MHz — first seen, last seen, records.<span class="meta">ADS-B</span></p>
         </div>
       </div>
-      <div class="hero-actions">
+      <nav class="hero-actions" aria-label="Primary">
         <a class="pill" href="/today">Today</a>
         <a class="pill" href="/activity">Activity</a>
         <a class="pill" href="{{ tar1090 }}/" target="_blank" rel="noopener">Open live map</a>
@@ -39,7 +39,7 @@
           {% if poller.is_live() %}<span class="wave" aria-hidden="true"><span></span><span></span><span></span><span></span></span>{% endif %}
           {{ poller.label() }}
         </span>
-      </div>
+      </nav>
     </header>
 
     {% if let Some(alert) = poller.alert() %}
@@ -84,7 +84,7 @@
                      {% if filter.interesting %}checked{% endif %}
                      hx-get="/partials/table" hx-trigger="change" hx-target="#fleet"
                      hx-include="#fleet-controls, #fleet-sort, #fleet-dir">
-              <label class="chip" for="f-int" title="Flagged interesting by tar1090">Interesting<span class="chip-n">{{ counts.interesting }}</span></label>
+              <label class="chip" for="f-int" title="On tar1090's interesting list">Interesting<span class="chip-n">{{ counts.interesting }}</span></label>
 
               <input type="checkbox" id="f-priv" name="privacy" value="1" class="chip-toggle"
                      {% if filter.privacy %}checked{% endif %}
@@ -158,14 +158,14 @@
               <label class="alt-field">≥
                 <input type="number" name="alt_min" min="0" step="100" inputmode="numeric"
                        value="{% if let Some(v) = filter.alt_min %}{{ v }}{% endif %}"
-                       placeholder="ft" aria-label="Minimum max altitude in feet"
+                       placeholder="ft" aria-label="Max altitude at least (feet)"
                        hx-get="/partials/table" hx-trigger="change" hx-target="#fleet"
                        hx-include="#fleet-controls, #fleet-sort, #fleet-dir">
               </label>
               <label class="alt-field">≤
                 <input type="number" name="alt_max" min="0" step="100" inputmode="numeric"
                        value="{% if let Some(v) = filter.alt_max %}{{ v }}{% endif %}"
-                       placeholder="ft" aria-label="Maximum max altitude in feet"
+                       placeholder="ft" aria-label="Max altitude at most (feet)"
                        hx-get="/partials/table" hx-trigger="change" hx-target="#fleet"
                        hx-include="#fleet-controls, #fleet-sort, #fleet-dir">
               </label>

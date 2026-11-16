@@ -28,8 +28,10 @@
       <td>{{ a.bearing_str(rx) }}</td>
       <td>{{ a.age_str() }}</td>
       <td class="links">
-        <a href="{{ a.map_url(tar1090.as_str()) }}" target="_blank" rel="noopener">map</a>
-        <a href="{{ a.trace_url(tar1090.as_str()) }}" target="_blank" rel="noopener">trace</a>
+        <a href="{{ a.map_url(tar1090.as_str()) }}" target="_blank" rel="noopener"
+           aria-label="Show {{ a.hex }} on the live map">map</a>
+        <a href="{{ a.trace_url(tar1090.as_str()) }}" target="_blank" rel="noopener"
+           aria-label="Show {{ a.hex }} trace">trace</a>
       </td>
     </tr>
     {% endfor %}

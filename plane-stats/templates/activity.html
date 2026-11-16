@@ -30,15 +30,15 @@
           <p class="tagline">When the sky is busy, and how far you hear.<span class="meta">ADS-B</span></p>
         </div>
       </div>
-      <div class="hero-actions">
+      <nav class="hero-actions" aria-label="Primary">
         <a class="pill" href="/">← Dashboard</a>
         <a class="pill" href="/today">Today</a>
         <a class="pill" href="{{ tar1090 }}/" target="_blank" rel="noopener">Open live map</a>
-      </div>
+      </nav>
     </header>
 
     <main id="main">
-      <section class="glass panel" aria-label="Weekday and hour activity">
+      <section class="glass panel" aria-label="Weekday × hour">
         <h2>Weekday × hour</h2>
         <p class="sr-only" id="heat-hint">Use the arrow keys to move between slots.</p>
         <div class="heatmap" role="grid" aria-label="Peak aircraft overhead for each weekday and local hour" aria-describedby="heat-hint">
@@ -59,7 +59,7 @@
           {% endfor %}
         </div>
         <div class="heatmap-legend">
-          <span class="chart-note">{% if heatmap.max > 0 %}busiest slot {{ heatmap.peak_weekday }} {{ heatmap.peak_hour }}:00 · {{ heatmap.max }} aircraft{% else %}no polls yet{% endif %}</span>
+          <span class="chart-note">{% if heatmap.max > 0 %}busiest slot: {{ heatmap.peak_weekday }} {{ heatmap.peak_hour }}:00 · {{ heatmap.max }} aircraft{% else %}no polls yet{% endif %}</span>
           <span class="legend-scale" aria-hidden="true">less
             <i class="heat-cell lvl-1"></i><i class="heat-cell lvl-2"></i><i class="heat-cell lvl-3"></i><i class="heat-cell lvl-4"></i><i class="heat-cell lvl-5"></i>
           more</span>
@@ -88,10 +88,10 @@
         </details>
       </section>
 
-      <section class="glass panel" aria-label="Range by day">
-        <h2>Range by day</h2>
+      <section class="glass panel" aria-label="Best range by day">
+        <h2>Best range by day</h2>
         {% if range.points.is_empty() %}
-        <p class="chart-empty">No range fixes yet. The line appears once aircraft report a distance.</p>
+        <p class="empty-note">No range data yet. The line appears once aircraft report a distance.</p>
         {% else %}
         <div class="chart">
           <div class="chart-body">
@@ -133,7 +133,7 @@
       <section class="glass panel" aria-label="Messages by day">
         <h2>Messages by day</h2>
         {% if messages.points.is_empty() %}
-        <p class="chart-empty">No polls yet.</p>
+        <p class="empty-note">No polls yet.</p>
         {% else %}
         <div class="chart">
           <div class="chart-body">
