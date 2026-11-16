@@ -20,6 +20,11 @@ const REGULAR_VISITS: i64 = 5;
 /// "Dormant" aircraft have not been seen for this long.
 const DORMANT_SECS: f64 = 7.0 * 86_400.0;
 
+/// Days of history plotted on `/activity`. `poll_log` is pruned at 90 days, so
+/// the messages series can never be longer than this.
+const RANGE_DAYS: i64 = 90;
+const MESSAGES_DAYS: i64 = 30;
+
 #[derive(Debug, serde::Serialize)]
 pub struct AircraftRow {
     pub hex: String,
@@ -199,11 +204,7 @@ impl Record {
         }
     }
     pub fn value_str(&self) -> String {
-        if (self.value - self.value.round()).abs() < f64::EPSILON {
-            format!("{}", self.value as i64)
-        } else {
-            format!("{:.1}", self.value)
-        }
+        fmt_num(self.value)
     }
     /// Human identity for a record holder: registration or callsign, plus type.
     pub fn ident(&self) -> String {
@@ -287,16 +288,29 @@ pub struct FleetFilter {
     pub alt_max: Option<i64>,
 }
 
-/// Local midnight as an epoch timestamp, matching the cards' "today" bucket.
-fn local_today_start() -> f64 {
-    let now = chrono::Local::now();
-    let midnight = now.date_naive().and_hms_opt(0, 0, 0).expect("valid midnight");
+/// Local calendar day (`YYYY-MM-DD`) for an epoch timestamp. Matches the
+/// `day` key the poller writes into `day_aircraft`.
+pub fn local_day(now: f64) -> String {
+    chrono::DateTime::from_timestamp(now as i64, 0)
+        .expect("valid ts")
+        .with_timezone(&chrono::Local)
+        .format("%Y-%m-%d")
+        .to_string()
+}
+
+/// Local midnight for the day containing `now`, as an epoch timestamp. Matches
+/// the cards' "today" bucket and the poller's `day_aircraft` day key.
+fn local_day_start(now: f64) -> f64 {
+    let dt = chrono::DateTime::from_timestamp(now as i64, 0)
+        .expect("valid ts")
+        .with_timezone(&chrono::Local);
+    let midnight = dt.date_naive().and_hms_opt(0, 0, 0).expect("valid midnight");
     // A DST transition can make local midnight ambiguous or nonexistent; fall
     // back to subtracting the elapsed seconds of the day instead of panicking
     // while the DB mutex is held.
     midnight.and_local_timezone(chrono::Local).earliest().map_or_else(
-        || now.timestamp() as f64 - f64::from(now.time().num_seconds_from_midnight()),
-        |dt| dt.timestamp() as f64,
+        || now - f64::from(dt.time().num_seconds_from_midnight()),
+        |m| m.timestamp() as f64,
     )
 }
 
@@ -349,7 +363,7 @@ impl FleetFilter {
         }
         if self.today {
             clauses.push("a.last_seen >= :today_start");
-            params.push((":today_start", Value::Real(local_today_start())));
+            params.push((":today_start", Value::Real(local_day_start(now))));
         }
         if self.new7 {
             clauses.push("a.first_seen >= :new7_start");
@@ -447,6 +461,575 @@ pub fn live_aircraft(db: &Db, now: f64) -> rusqlite::Result<Vec<AircraftRow>> {
     rows.collect()
 }
 
+/// One local hour of today's traffic: peak aircraft overhead in that hour.
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct HourBucket {
+    pub hour: u32,
+    pub count: i64,
+}
+
+impl HourBucket {
+    pub fn label(&self) -> String {
+        format!("{:02}", self.hour)
+    }
+    /// Label only every third hour; the rest keep the row height.
+    pub fn show_label(&self) -> bool {
+        self.hour % 3 == 0
+    }
+    /// Bar height as a percentage of the busiest hour. Any traffic gets a 2%
+    /// floor so a quiet hour stays visible.
+    pub fn pct(&self, max: &i64) -> i64 {
+        if self.count <= 0 || *max <= 0 {
+            0
+        } else {
+            (self.count * 100 / *max).max(2)
+        }
+    }
+}
+
+/// A metric's best value today, plus the best on any earlier day.
+#[derive(Debug, serde::Serialize)]
+pub struct DayRecord {
+    pub metric: &'static str,
+    pub unit: &'static str,
+    pub today: f64,
+    pub prior: Option<f64>,
+    /// True only when a prior day exists and today beat it.
+    pub improved: bool,
+    pub hex: String,
+    pub ident: String,
+}
+
+impl DayRecord {
+    pub fn today_str(&self) -> String {
+        fmt_num(self.today)
+    }
+    pub fn prior_str(&self) -> String {
+        self.prior.map(fmt_num).unwrap_or_else(|| "-".into())
+    }
+}
+
+#[derive(Debug, Default, serde::Serialize)]
+pub struct TodaySummary {
+    pub day: String,
+    pub unique: i64,
+    /// Aircraft in today's ledger whose all-time first sighting was today.
+    /// Always a subset of `unique`.
+    pub new: i64,
+    /// Poll cycles recorded today.
+    pub polls: i64,
+    /// Aircraft-poll sightings today (sum of `day_aircraft.polls`).
+    pub sightings: i64,
+    /// Messages received today: sum of positive deltas of tar1090's cumulative
+    /// `messages` counter across today's polls.
+    pub messages: i64,
+    pub peak_airborne: Option<i64>,
+    pub first_ts: Option<f64>,
+    pub last_ts: Option<f64>,
+}
+
+impl TodaySummary {
+    fn fmt_ts(epoch: f64) -> String {
+        chrono::DateTime::from_timestamp(epoch as i64, 0)
+            .expect("valid ts")
+            .with_timezone(&chrono::Local)
+            .format("%H:%M")
+            .to_string()
+    }
+    pub fn first_str(&self) -> Option<String> {
+        self.first_ts.map(Self::fmt_ts)
+    }
+    pub fn last_str(&self) -> Option<String> {
+        self.last_ts.map(Self::fmt_ts)
+    }
+    /// `HH:MM–HH:MM` local span of today's activity.
+    pub fn span_str(&self) -> String {
+        match (self.first_str(), self.last_str()) {
+            (Some(a), Some(b)) => format!("{a}–{b}"),
+            _ => "-".into(),
+        }
+    }
+}
+
+fn fmt_num(v: f64) -> String {
+    if (v - v.round()).abs() < f64::EPSILON {
+        format!("{}", v as i64)
+    } else {
+        format!("{v:.1}")
+    }
+}
+
+/// Compact y-axis labels: large counters read as `394k` instead of six digits.
+fn fmt_axis(v: f64) -> String {
+    let a = v.abs();
+    if a >= 1_000_000.0 {
+        format!("{:.1}M", v / 1_000_000.0)
+    } else if a >= 10_000.0 {
+        format!("{:.0}k", v / 1_000.0)
+    } else if a >= 1_000.0 {
+        format!("{:.1}k", v / 1_000.0)
+    } else {
+        fmt_num(v)
+    }
+}
+
+/// Today's row in the daily ledger, aggregated.
+pub fn today_summary(db: &Db, now: f64) -> rusqlite::Result<TodaySummary> {
+    let conn = crate::db_lock(db);
+    let day = local_day(now);
+    let today_start = local_day_start(now);
+    let (unique, sightings, first_ts, last_ts) = conn.query_row(
+        "SELECT COUNT(*), COALESCE(SUM(polls), 0), MIN(first_ts), MAX(last_ts)
+         FROM day_aircraft WHERE day = ?1",
+        params![day],
+        |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)),
+    )?;
+    // Scoped to today's ledger rows so `new ⊆ unique`: on the day the ledger
+    // was created, aircraft first seen earlier that day have no ledger row.
+    let new: i64 = conn.query_row(
+        "SELECT COUNT(*) FROM day_aircraft d JOIN aircraft a ON a.hex = d.hex
+         WHERE d.day = ?1 AND a.first_seen >= ?2",
+        params![day, today_start],
+        |r| r.get(0),
+    )?;
+    let (polls, peak_airborne) = conn.query_row(
+        "SELECT COUNT(*), MAX(aircraft_count) FROM poll_log WHERE ts >= ?1",
+        params![today_start],
+        |r| Ok((r.get(0)?, r.get(1)?)),
+    )?;
+    // `poll_log.messages` is tar1090's cumulative counter, not a per-poll count.
+    // Sum the positive deltas so the digest reports messages received today and
+    // a readsb restart mid-day does not produce a negative contribution.
+    let messages: i64 = conn.query_row(
+        "SELECT COALESCE(SUM(CASE WHEN d > 0 THEN d ELSE 0 END), 0) FROM (
+           SELECT messages - LAG(messages) OVER (ORDER BY ts) AS d
+           FROM poll_log WHERE ts >= ?1
+         )",
+        params![today_start],
+        |r| r.get(0),
+    )?;
+    Ok(TodaySummary {
+        day,
+        unique,
+        new,
+        polls,
+        sightings,
+        messages,
+        peak_airborne,
+        first_ts,
+        last_ts,
+    })
+}
+
+/// Peak aircraft overhead per local hour today, always 24 buckets.
+pub fn hour_histogram(db: &Db, now: f64) -> rusqlite::Result<Vec<HourBucket>> {
+    let conn = crate::db_lock(db);
+    let today_start = local_day_start(now);
+    let tz_offset = chrono::Local::now().offset().local_minus_utc() as i64;
+    let mut stmt = conn.prepare(
+        "SELECT CAST(((ts + ?1) % 86400) / 3600 AS INTEGER) AS hour, MAX(max_count)
+         FROM poll_hour WHERE ts >= ?2 GROUP BY hour",
+    )?;
+    let mut buckets: Vec<HourBucket> =
+        (0..24).map(|hour| HourBucket { hour, count: 0 }).collect();
+    let rows = stmt.query_map(params![tz_offset, today_start], |r| {
+        Ok((r.get::<_, i64>(0)?, r.get::<_, i64>(1)?))
+    })?;
+    for row in rows {
+        let (hour, count) = row?;
+        if let Some(b) = buckets.get_mut(hour as usize) {
+            b.count = count;
+        }
+    }
+    Ok(buckets)
+}
+
+/// Weekday labels in heatmap row order, Monday first.
+const WEEKDAYS: [&str; 7] = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
+
+/// One cell of the weekday × hour activity grid.
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct HeatCell {
+    pub hour: u32,
+    pub count: i64,
+}
+
+impl HeatCell {
+    /// 0 = no traffic; 1..=5 = intensity relative to the busiest cell.
+    pub fn level(&self, max: &i64) -> u8 {
+        if self.count <= 0 || *max <= 0 {
+            0
+        } else {
+            (((self.count * 5 + *max - 1) / *max) as u8).clamp(1, 5)
+        }
+    }
+    pub fn title(&self, weekday: &str) -> String {
+        format!("{weekday} {:02}:00 · {} aircraft", self.hour, self.count)
+    }
+}
+
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct HeatRow {
+    pub weekday: u32,
+    pub label: &'static str,
+    pub cells: Vec<HeatCell>,
+    /// Sum of the row's per-slot peaks; ranks weekdays against each other.
+    pub total: i64,
+}
+
+/// Peak aircraft overhead for every weekday × local hour slot.
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct Heatmap {
+    pub rows: Vec<HeatRow>,
+    pub max: i64,
+    /// Weekday label of the busiest slot, empty when there are no polls.
+    pub peak_weekday: String,
+    pub peak_hour: u32,
+}
+
+/// `poll_hour` is the same MAX-per-hour rollup as `poll_log`, so grouping it
+/// gives identical cells with ~360× fewer rows. The local offset is applied in
+/// SQL like the cards, so the busiest cell equals the "busiest hour" card.
+pub fn weekday_hour_heatmap(db: &Db) -> rusqlite::Result<Heatmap> {
+    let conn = crate::db_lock(db);
+    let tz_offset = chrono::Local::now().offset().local_minus_utc() as i64;
+    let mut counts = [[0i64; 24]; 7];
+    let mut stmt = conn.prepare(
+        "SELECT CAST((((ts + ?1) / 86400) + 3) % 7 AS INTEGER) AS weekday,
+                CAST(((ts + ?1) % 86400) / 3600 AS INTEGER) AS hour,
+                MAX(max_count)
+         FROM poll_hour GROUP BY weekday, hour",
+    )?;
+    let rows = stmt.query_map(params![tz_offset], |r| {
+        Ok((r.get::<_, i64>(0)?, r.get::<_, i64>(1)?, r.get::<_, i64>(2)?))
+    })?;
+    for row in rows {
+        let (weekday, hour, count) = row?;
+        if let (Ok(w), Ok(h)) = (usize::try_from(weekday), usize::try_from(hour)) {
+            if let Some(slot) = counts.get_mut(w).and_then(|cells| cells.get_mut(h)) {
+                *slot = count;
+            }
+        }
+    }
+
+    let mut max = 0i64;
+    let mut peak = (0usize, 0usize);
+    let mut out = Vec::with_capacity(7);
+    for (weekday, cells) in counts.iter().enumerate() {
+        for (hour, count) in cells.iter().enumerate() {
+            if *count > max {
+                max = *count;
+                peak = (weekday, hour);
+            }
+        }
+        out.push(HeatRow {
+            weekday: weekday as u32,
+            label: WEEKDAYS[weekday],
+            cells: cells
+                .iter()
+                .enumerate()
+                .map(|(hour, count)| HeatCell { hour: hour as u32, count: *count })
+                .collect(),
+            total: cells.iter().sum(),
+        });
+    }
+    Ok(Heatmap {
+        rows: out,
+        max,
+        peak_weekday: if max > 0 { WEEKDAYS[peak.0].to_string() } else { String::new() },
+        peak_hour: peak.1 as u32,
+    })
+}
+
+/// One point in a daily series (`day` is the local `YYYY-MM-DD` key).
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct DayValue {
+    pub day: String,
+    pub value: f64,
+}
+
+/// Best range per local day, one point per day, last 90 days.
+pub fn range_by_day(db: &Db, now: f64) -> rusqlite::Result<Vec<DayValue>> {
+    let conn = crate::db_lock(db);
+    let cutoff = local_day(now - (RANGE_DAYS - 1) as f64 * 86_400.0);
+    let mut stmt = conn.prepare(
+        "SELECT day, MAX(max_range_nm) FROM day_aircraft
+         WHERE day >= ?1 AND max_range_nm IS NOT NULL
+         GROUP BY day ORDER BY day",
+    )?;
+    let rows = stmt.query_map(params![cutoff], |r| {
+        Ok(DayValue { day: r.get(0)?, value: r.get(1)? })
+    })?;
+    rows.collect()
+}
+
+/// Messages received per local day, last 30 days. `poll_log.messages` is
+/// tar1090's cumulative counter, so sum the positive per-poll deltas.
+pub fn messages_by_day(db: &Db, now: f64) -> rusqlite::Result<Vec<DayValue>> {
+    let conn = crate::db_lock(db);
+    let cutoff = now - (MESSAGES_DAYS - 1) as f64 * 86_400.0;
+    let tz_offset = chrono::Local::now().offset().local_minus_utc() as i64;
+    let mut stmt = conn.prepare(
+        "SELECT day, COALESCE(SUM(CASE WHEN delta > 0 THEN delta ELSE 0 END), 0)
+         FROM (
+           SELECT CAST((ts + ?1) / 86400 AS INTEGER) AS day,
+                  messages - LAG(messages) OVER (ORDER BY ts) AS delta
+           FROM poll_log WHERE ts >= ?2
+         )
+         GROUP BY day ORDER BY day",
+    )?;
+    let rows = stmt.query_map(params![tz_offset, cutoff], |r| {
+        let day: i64 = r.get(0)?;
+        // `day` is already a local day index (offset applied in SQL). Format it
+        // in UTC directly: converting back through `Local` would apply the
+        // historical DST offset and can shift the label one day around the
+        // spring transition.
+        let day = chrono::DateTime::from_timestamp(day * 86_400, 0)
+            .expect("valid ts")
+            .format("%Y-%m-%d")
+            .to_string();
+        Ok(DayValue { day, value: r.get(1)? })
+    })?;
+    rows.collect()
+}
+
+#[derive(Debug, serde::Serialize)]
+pub struct Activity {
+    pub heatmap: Heatmap,
+    pub range: Vec<DayValue>,
+    pub messages: Vec<DayValue>,
+}
+
+pub fn activity(db: &Db, now: f64) -> rusqlite::Result<Activity> {
+    Ok(Activity {
+        heatmap: weekday_hour_heatmap(db)?,
+        range: range_by_day(db, now)?,
+        messages: messages_by_day(db, now)?,
+    })
+}
+
+/// Fixed viewBox for the activity charts; CSS scales it to the panel width.
+const CHART_W: f64 = 640.0;
+const CHART_H: f64 = 120.0;
+const CHART_PAD: f64 = 8.0;
+
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct ChartPoint {
+    pub x: f64,
+    pub y: f64,
+    pub label: String,
+    pub value: f64,
+}
+
+impl ChartPoint {
+    pub fn value_str(&self) -> String {
+        fmt_num(self.value)
+    }
+}
+
+/// A y-axis tick: label text plus its position as a percentage from the top
+/// (for the HTML label column) and in viewBox units (for the SVG gridline).
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct AxisLabel {
+    pub text: String,
+    pub top: f64,
+    pub y: f64,
+}
+
+/// A daily series scaled into a fixed SVG viewBox.
+#[derive(Debug, serde::Serialize)]
+pub struct LineChart {
+    pub path: String,
+    pub area: String,
+    pub points: Vec<ChartPoint>,
+    pub min: f64,
+    pub max: f64,
+    pub first_label: String,
+    pub last_label: String,
+    pub width: f64,
+    pub height: f64,
+    pub y_labels: Vec<AxisLabel>,
+    pub plot_left: f64,
+    pub plot_right: f64,
+}
+
+impl LineChart {
+    /// One point per day, evenly spaced. Missing days compress rather than
+    /// leaving calendar gaps, so the line stays readable on a sparse ledger.
+    pub fn build(series: &[DayValue]) -> Self {
+        let (width, height) = (CHART_W, CHART_H);
+        if series.is_empty() {
+            return Self {
+                path: String::new(),
+                area: String::new(),
+                points: Vec::new(),
+                min: 0.0,
+                max: 0.0,
+                first_label: String::new(),
+                last_label: String::new(),
+                width,
+                height,
+                y_labels: Vec::new(),
+                plot_left: 0.0,
+                plot_right: 0.0,
+            };
+        }
+        let min = series.iter().map(|d| d.value).fold(f64::INFINITY, f64::min);
+        let max = series.iter().map(|d| d.value).fold(f64::NEG_INFINITY, f64::max);
+        let flat = max - min < f64::EPSILON;
+        let span = if flat { 1.0 } else { max - min };
+        let n = series.len();
+        let step = if n > 1 { (width - 2.0 * CHART_PAD) / (n - 1) as f64 } else { 0.0 };
+        let points: Vec<ChartPoint> = series
+            .iter()
+            .enumerate()
+            .map(|(i, d)| {
+                let x = if n > 1 { CHART_PAD + step * i as f64 } else { width / 2.0 };
+                let y = if flat {
+                    height / 2.0
+                } else {
+                    height - CHART_PAD - ((d.value - min) / span) * (height - 2.0 * CHART_PAD)
+                };
+                ChartPoint { x, y, label: short_day(&d.day), value: d.value }
+            })
+            .collect();
+        let mut path = String::new();
+        let mut area = format!("M {:.1},{:.1}", points[0].x, height - CHART_PAD);
+        for (i, p) in points.iter().enumerate() {
+            let cmd = if i == 0 { "M" } else { "L" };
+            path.push_str(&format!(" {cmd} {:.1},{:.1}", p.x, p.y));
+            area.push_str(&format!(" L {:.1},{:.1}", p.x, p.y));
+        }
+        area.push_str(&format!(" L {:.1},{:.1} Z", points[n - 1].x, height - CHART_PAD));
+        let y_labels = if flat {
+            vec![AxisLabel { text: fmt_axis(min), top: 50.0, y: height / 2.0 }]
+        } else {
+            vec![
+                AxisLabel {
+                    text: fmt_axis(max),
+                    top: CHART_PAD / height * 100.0,
+                    y: CHART_PAD,
+                },
+                AxisLabel {
+                    text: fmt_axis((min + max) / 2.0),
+                    top: 50.0,
+                    y: height / 2.0,
+                },
+                AxisLabel {
+                    text: fmt_axis(min),
+                    top: (height - CHART_PAD) / height * 100.0,
+                    y: height - CHART_PAD,
+                },
+            ]
+        };
+        Self {
+            path: path.trim_start().to_string(),
+            area,
+            min,
+            max,
+            first_label: points[0].label.clone(),
+            last_label: points[n - 1].label.clone(),
+            points,
+            width,
+            height,
+            y_labels,
+            plot_left: CHART_PAD,
+            plot_right: width - CHART_PAD,
+        }
+    }
+}
+
+fn short_day(day: &str) -> String {
+    chrono::NaiveDate::parse_from_str(day, "%Y-%m-%d")
+        .map(|d| d.format("%b %d").to_string())
+        .unwrap_or_else(|_| day.to_string())
+}
+
+/// Today's best altitude, speed, and range against every earlier day.
+pub fn records_today(db: &Db, now: f64) -> rusqlite::Result<Vec<DayRecord>> {
+    let conn = crate::db_lock(db);
+    let day = local_day(now);
+    let mut out = Vec::with_capacity(3);
+    for (metric, unit, col) in [
+        ("Altitude", "ft", "max_alt_ft"),
+        ("Speed", "kt", "max_gs_kts"),
+        ("Range", "nm", "max_range_nm"),
+    ] {
+        if let Some(rec) = day_record(&conn, &day, metric, unit, col)? {
+            out.push(rec);
+        }
+    }
+    Ok(out)
+}
+
+/// `col` is one of the fixed metric columns above, never user input.
+fn day_record(
+    conn: &Connection,
+    day: &str,
+    metric: &'static str,
+    unit: &'static str,
+    col: &str,
+) -> rusqlite::Result<Option<DayRecord>> {
+    let today = conn
+        .query_row(
+            &format!(
+                "SELECT d.hex, d.{col}, e.registration, e.typecode, a.last_flight
+                 FROM day_aircraft d
+                 LEFT JOIN aircraft a ON a.hex = d.hex
+                 LEFT JOIN enrichment e ON e.icao24 = d.hex
+                 WHERE d.day = ?1 AND d.{col} IS NOT NULL
+                 ORDER BY d.{col} DESC LIMIT 1"
+            ),
+            params![day],
+            |r| {
+                let hex: String = r.get(0)?;
+                let registration: Option<String> = r.get(2)?;
+                let typecode: Option<String> = r.get(3)?;
+                let callsign: Option<String> = r.get(4)?;
+                let name = registration.or(callsign).unwrap_or_else(|| hex.clone());
+                let ident = match typecode {
+                    Some(t) => format!("{name} · {t}"),
+                    None => name,
+                };
+                Ok(DayRecord {
+                    metric,
+                    unit,
+                    today: r.get(1)?,
+                    prior: None,
+                    improved: false,
+                    hex,
+                    ident,
+                })
+            },
+        )
+        .optional()?;
+    let Some(mut rec) = today else { return Ok(None) };
+    let prior: Option<f64> = conn.query_row(
+        &format!("SELECT MAX({col}) FROM day_aircraft WHERE day < ?1"),
+        params![day],
+        |r| r.get(0),
+    )?;
+    rec.improved = prior.is_some_and(|p| rec.today > p);
+    rec.prior = prior;
+    Ok(Some(rec))
+}
+
+/// Aircraft seen for the first time today, newest first. Restricted to rows in
+/// today's ledger so the list matches `TodaySummary::new` and never exceeds
+/// `unique`.
+pub fn new_today(db: &Db, now: f64) -> rusqlite::Result<Vec<AircraftRow>> {
+    let conn = crate::db_lock(db);
+    let mut stmt = conn.prepare(&format!(
+        "SELECT {COLS} {FROM} JOIN day_aircraft d ON d.hex = a.hex AND d.day = ?1
+         WHERE a.first_seen >= ?2 ORDER BY a.first_seen DESC LIMIT 500"
+    ))?;
+    let rows = stmt.query_map(
+        params![local_day(now), local_day_start(now)],
+        row_to_aircraft,
+    )?;
+    rows.collect()
+}
+
 #[derive(Debug, Default, Clone, serde::Serialize)]
 pub struct Record {
     pub hex: String,
@@ -460,6 +1043,8 @@ pub struct Stats {
     pub total_aircraft: i64,
     pub currently_airborne: i64,
     pub first_seen_today: i64,
+    /// Distinct aircraft in today's `day_aircraft` ledger.
+    pub heard_today: i64,
     pub new_last_7d: i64,
     pub avg_airborne_24h: Option<f64>,
     pub first_seen: Option<f64>,
@@ -559,7 +1144,7 @@ pub fn stats(db: &Db, now: f64) -> rusqlite::Result<Stats> {
         params![now - LIVE_WINDOW_SECS],
         |r| r.get(0),
     )?;
-    let today_start = local_today_start();
+    let today_start = local_day_start(now);
     // Bucket poll_log by local hour/day. The offset is applied in SQL so the
     // stored epoch labels line up with what the cards render in local time.
     let tz_offset = chrono::Local::now().offset().local_minus_utc() as f64;
@@ -567,6 +1152,11 @@ pub fn stats(db: &Db, now: f64) -> rusqlite::Result<Stats> {
         conn.query_row("SELECT COUNT(*) FROM aircraft WHERE first_seen >= ?1", params![today_start], |r| {
             r.get(0)
         })?;
+    let heard_today: i64 = conn.query_row(
+        "SELECT COUNT(*) FROM day_aircraft WHERE day = ?1",
+        params![local_day(now)],
+        |r| r.get(0),
+    )?;
     let new_last_7d: i64 = conn.query_row(
         "SELECT COUNT(*) FROM aircraft WHERE first_seen >= ?1",
         params![now - 7.0 * 86_400.0],
@@ -651,6 +1241,7 @@ pub fn stats(db: &Db, now: f64) -> rusqlite::Result<Stats> {
         total_aircraft,
         currently_airborne,
         first_seen_today,
+        heard_today,
         new_last_7d,
         avg_airborne_24h,
         first_seen,

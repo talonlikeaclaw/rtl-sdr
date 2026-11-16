@@ -35,6 +35,19 @@ Built and working:
   chip row in `#fleet-controls`, carried to the sort headers and pager by
   `hx-include="#fleet-controls"` (no generated query suffix), and
   `db_flags` stored from tar1090 `dbFlags` (bit 0 = military).
+- Daily ledger + `/today` digest: `day_aircraft` (one row per local day per
+  hex, MAX alt/speed/range, `polls`, first/last ts) is upserted by the poller
+  in the same transaction as `aircraft`/`visits`; `today_summary`,
+  `hour_histogram`, `records_today`, `new_today` in `stats.rs`; `/today` page
+  + `/api/today`; index gets a "heard today" card and a Today pill. Data
+  starts at deploy — there is no backfill from `visits`; `new` is scoped to
+  today's ledger rows so it never exceeds `unique`.
+- Activity page: `weekday_hour_heatmap` (7×24 peak aircraft from `poll_hour`,
+  local offset applied in SQL), `range_by_day` (best range per local day from
+  `day_aircraft`, 90 days), `messages_by_day` (positive deltas of tar1090's
+  cumulative counter, 30 days); `/activity` renders a CSS-grid heatmap and two
+  inline SVG line charts, `/api/activity` returns the raw series. The busiest
+  heatmap cell equals the "busiest hour" card by construction.
 
 Refresh model (60 s tbody-only tick, `hx-sync`, `poll_hour` rollup, cached
 `stats()`) is documented in `AGENTS.md` under "plane-stats status".
@@ -274,7 +287,7 @@ re-notify; denied permission leaves the page functional.
 | 2. Live panel | done | `plane-stats: live overhead panel with current state` |
 | 3. Pagination | done | `plane-stats: paginate fleet table` |
 | 4. Filters | done | `plane-stats: fleet filters (category, military, recency, altitude)` |
-| 5. `day_aircraft` + `/today` | pending | — |
-| 6. Heatmap + range history | pending | — |
+| 5. `day_aircraft` + `/today` | done | `plane-stats: daily ledger and /today digest` |
+| 6. Heatmap + range history | done | `plane-stats: activity heatmap and range history` |
 | 7. Notifications | pending | — |
 | 8. Polish | pending | — |

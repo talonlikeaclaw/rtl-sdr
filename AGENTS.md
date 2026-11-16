@@ -87,6 +87,10 @@ docker compose --profile adsb build plane-stats
   **not** add `hideSidebar`: tar1090 persists it in its own localStorage (a
   permanent layout change for the user), it does not hide the
   selected-infoblock panel, and tar1090 strips consumed params from the URL.
+- `app.css` is `include_bytes!`'d into the binary and served `Cache-Control:
+  no-cache`; the templates link `/app.css?v=2` to invalidate copies cached
+  under the old one-day header. Bump the query only if a long-cached URL must
+  be broken again.
 - **tar1090 `dbFlags`:** bit 0 = military, 1 = interesting, 2 = PIA, 3 = LADD.
 - `aircraft.json` per-aircraft fields worth knowing: `r_dst` (range nm), `seen`
   (message age s), `seen_pos`, `dbFlags`, `category`. The poller keeps only
@@ -115,6 +119,50 @@ stored from tar1090 `dbFlags`).
 Military, Interesting and Privacy rows only match once re-seen: `db_flags` was
 added after the fact, so older rows are NULL until the aircraft flies past
 again (tar1090 omits `dbFlags` when it is 0, hence the `coalesce` on upsert).
+
+Daily ledger (`day_aircraft`) and `/today`:
+
+- The poller upserts one row per `(local day, hex)` in the same transaction as
+  `aircraft`/`visits`: `first_ts`/`last_ts`, `polls`, and MAX
+  `max_alt_ft`/`max_gs_kts`/`max_range_nm`. The day key is
+  `stats::local_day(now)` derived from the poll timestamp, so a poll that
+  straddles midnight is filed under the day it was taken.
+- `today_summary`, `hour_histogram` (24 buckets from `poll_hour`), and
+  `records_today` (today's best vs `day < today`) live in `stats.rs`.
+  `new_today` returns the aircraft whose all-time `first_seen` is today.
+- `/today` renders the digest; `/api/today` returns
+  `{summary, hours, records, new}`. The index has a "heard today" card (from
+  `Stats::heard_today`) and a Today pill.
+- Data starts at deploy: there is no backfill from `visits`. `day_aircraft` is
+  never pruned.
+- `records_today` compares against prior days only; on the first day every
+  record shows `prior: null` / "held", not "new record".
+- `new` and `new_today` are scoped to today's ledger rows (joined to
+  `aircraft.first_seen >= local midnight`), so `new <= unique`. On the deploy
+  day they are lower than the "new today" card, which counts every aircraft
+  first seen today regardless of ledger coverage.
+- `poll_log.messages` is tar1090's *cumulative* counter, so `today_summary`
+  sums the positive per-poll deltas (`LAG`) instead of `SUM(messages)`; never
+  sum the raw column.
+
+Activity (`/activity`, `/api/activity`):
+
+- `weekday_hour_heatmap` groups the `poll_hour` rollup into 7×24 local
+  weekday/hour cells with the current `TZ` offset applied in SQL. Grouping
+  `poll_hour` is identical to grouping `poll_log` (it stores the same
+  MAX-per-hour) with ~360× fewer rows, and its global max is the "busiest
+  hour" card's value by construction.
+- `range_by_day` is the best `max_range_nm` per `day_aircraft.day` for the last
+  90 days (one point per day); `messages_by_day` sums the positive per-poll
+  deltas of the cumulative counter for the last 30 days. `LineChart::build`
+  scales either series into a fixed 640×120 SVG viewBox and the template
+  inlines the path/area/dots.
+- The heatmap is a CSS grid with `minmax(0, 1fr)` columns and
+  `overflow: hidden`, so it never adds horizontal scroll on mobile.
+- The `/today` histogram tooltip (`#hist-tip`) is a direct child of `<body>`,
+  not of the panel: `.glass` uses `backdrop-filter`, which makes it the
+  containing block for `position: fixed` descendants, so a tooltip inside the
+  panel would be offset and stacked under later panels.
 
 Refresh model (do not "simplify" back to a whole-table tick):
 
@@ -145,8 +193,8 @@ Detailed step-by-step plan for the remaining work: `plane-stats/PLAN.md`.
 
 Remaining ideas (ranked by value-to-effort):
 
-1. **Daily digest**: "today you saw N aircraft, M new, record range X nm" — page
-   or Telegram/Discord push.
+1. **Daily digest push**: "today you saw N aircraft, M new, record range X nm"
+   — the `/today` page exists; add Telegram/Discord delivery.
 2. **Range-over-time graph** from `poll_log` (already collected) to see
    antenna/autogain changes pay off.
 3. **"New to me" alert feed**: first-time hexes with a dashboard toast.

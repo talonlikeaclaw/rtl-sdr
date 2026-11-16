@@ -1,0 +1,119 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#060a15">
+  <title>Activity · plane-stats</title>
+  <link rel="stylesheet" href="/app.css?v=2">
+</head>
+<body>
+  <div class="bg" aria-hidden="true">
+    <span class="orb orb-a"></span>
+    <span class="orb orb-b"></span>
+    <span class="orb orb-c"></span>
+  </div>
+
+  <div class="shell">
+    <header class="hero">
+      <div class="brand">
+        <span class="mark" aria-hidden="true">
+          <svg viewBox="0 0 24 24" fill="currentColor">
+            <path d="M21.5 15.2v-1.9l-7.6-4.8V3.6a1.4 1.4 0 0 0-2.8 0v4.9L3.5 13.3v1.9l7.6-2.3v4.3l-2.3 1.7v1.4l3.7-1.1 3.7 1.1v-1.4l-2.3-1.7v-4.3z"/>
+          </svg>
+        </span>
+        <div>
+          <h1>Activity</h1>
+          <p class="tagline">When the sky is busy, and how far you hear.<span class="meta">ADS-B</span></p>
+        </div>
+      </div>
+      <div class="hero-actions">
+        <a class="pill" href="/">← Dashboard</a>
+        <a class="pill" href="/today">Today</a>
+        <a class="pill" href="{{ tar1090 }}/" target="_blank" rel="noopener">Open live map</a>
+      </div>
+    </header>
+
+    <main>
+      <section class="glass panel" aria-label="Weekday and hour activity">
+        <h2>Weekday × hour</h2>
+        <div class="heatmap" role="img" aria-label="Peak aircraft overhead for each weekday and local hour">
+          <div class="heatmap-corner" aria-hidden="true"></div>
+          {% for h in hours %}<div class="heatmap-hour" aria-hidden="true">{{ h }}</div>{% endfor %}
+          {% for row in heatmap.rows %}
+          <div class="heatmap-day">{{ row.label }}</div>
+          {% for c in row.cells %}
+          <div class="heat-cell lvl-{{ c.level(heatmap.max) }}{% if c.count == heatmap.max && heatmap.max > 0 %} peak{% endif %}"
+               title="{{ c.title(row.label) }}"></div>
+          {% endfor %}
+          {% endfor %}
+        </div>
+        <div class="heatmap-legend">
+          <span class="chart-note">{% if heatmap.max > 0 %}busiest slot {{ heatmap.peak_weekday }} {{ heatmap.peak_hour }}:00 · {{ heatmap.max }} aircraft{% else %}no polls yet{% endif %}</span>
+          <span class="legend-scale" aria-hidden="true">less
+            <i class="heat-cell lvl-1"></i><i class="heat-cell lvl-2"></i><i class="heat-cell lvl-3"></i><i class="heat-cell lvl-4"></i><i class="heat-cell lvl-5"></i>
+          more</span>
+        </div>
+      </section>
+
+      <section class="glass panel" aria-label="Range by day">
+        <h2>Range by day</h2>
+        {% if range.points.is_empty() %}
+        <p class="chart-empty">No range fixes yet. The line appears once aircraft report a distance.</p>
+        {% else %}
+        <div class="chart">
+          <div class="chart-body">
+            <div class="chart-y" aria-hidden="true">
+              {% for l in range.y_labels %}
+              <span style="top: {{ l.top }}%">{{ l.text }}</span>
+              {% endfor %}
+            </div>
+            <svg viewBox="0 0 {{ range.width }} {{ range.height }}" role="img" aria-label="Best range per day in nautical miles">
+              {% for l in range.y_labels %}
+              <line class="chart-grid" x1="{{ range.plot_left }}" x2="{{ range.plot_right }}" y1="{{ l.y }}" y2="{{ l.y }}"></line>
+              {% endfor %}
+              <path class="chart-area" d="{{ range.area }}"></path>
+              <path class="chart-line" d="{{ range.path }}"></path>
+              {% for p in range.points %}
+              <circle class="chart-dot" cx="{{ p.x }}" cy="{{ p.y }}" r="2.4"><title>{{ p.label }} · {{ p.value_str() }} nm</title></circle>
+              {% endfor %}
+            </svg>
+            <div class="chart-axis"><span>{{ range.first_label }}</span><span>nm</span><span>{{ range.last_label }}</span></div>
+          </div>
+        </div>
+        {% endif %}
+      </section>
+
+      <section class="glass panel" aria-label="Messages by day">
+        <h2>Messages by day</h2>
+        {% if messages.points.is_empty() %}
+        <p class="chart-empty">No polls yet.</p>
+        {% else %}
+        <div class="chart">
+          <div class="chart-body">
+            <div class="chart-y" aria-hidden="true">
+              {% for l in messages.y_labels %}
+              <span style="top: {{ l.top }}%">{{ l.text }}</span>
+              {% endfor %}
+            </div>
+            <svg viewBox="0 0 {{ messages.width }} {{ messages.height }}" role="img" aria-label="Messages received per day">
+              {% for l in messages.y_labels %}
+              <line class="chart-grid" x1="{{ messages.plot_left }}" x2="{{ messages.plot_right }}" y1="{{ l.y }}" y2="{{ l.y }}"></line>
+              {% endfor %}
+              <path class="chart-area" d="{{ messages.area }}"></path>
+              <path class="chart-line" d="{{ messages.path }}"></path>
+              {% for p in messages.points %}
+              <circle class="chart-dot" cx="{{ p.x }}" cy="{{ p.y }}" r="2.4"><title>{{ p.label }} · {{ p.value_str() }} messages</title></circle>
+              {% endfor %}
+            </svg>
+            <div class="chart-axis"><span>{{ messages.first_label }}</span><span>messages</span><span>{{ messages.last_label }}</span></div>
+          </div>
+        </div>
+        {% endif %}
+      </section>
+    </main>
+
+    <footer>LOCAL LEDGER · SQLITE · NO CLOUD</footer>
+  </div>
+</body>
+</html>

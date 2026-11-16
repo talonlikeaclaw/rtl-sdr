@@ -15,6 +15,8 @@ const APP_CSS: &[u8] = include_bytes!("../static/app.css");
 pub fn router(db: Db) -> Router {
     Router::new()
         .route("/", get(index))
+        .route("/today", get(today_page))
+        .route("/activity", get(activity_page))
         .route("/aircraft/:hex", get(aircraft_profile))
         .route("/api/aircraft/:hex", get(api_aircraft_hex))
         .route("/partials/table", get(table_partial))
@@ -25,6 +27,8 @@ pub fn router(db: Db) -> Router {
         .route("/api/aircraft", get(api_aircraft))
         .route("/api/emergencies", get(api_emergencies))
         .route("/api/live", get(api_live))
+        .route("/api/today", get(api_today))
+        .route("/api/activity", get(api_activity))
         .route("/api/stats", get(api_stats))
         .route("/htmx.min.js", get(htmx_js))
         .route("/app.css", get(app_css))
@@ -377,6 +381,79 @@ async fn api_live(State(db): State<Db>) -> Result<Json, AppError> {
     Ok(Json(serde_json::to_value(stats::live_aircraft(&db, now())?)?))
 }
 
+#[derive(Template)]
+#[template(path = "today.html")]
+struct TodayTemplate {
+    summary: stats::TodaySummary,
+    hours: Vec<stats::HourBucket>,
+    hours_max: i64,
+    records: Vec<stats::DayRecord>,
+    new: Vec<AircraftRow>,
+    tar1090: String,
+}
+
+async fn today_page(State(db): State<Db>, headers: HeaderMap) -> Result<Html<String>, AppError> {
+    let now = now();
+    let hours = stats::hour_histogram(&db, now)?;
+    let hours_max = hours.iter().map(|h| h.count).max().unwrap_or(0);
+    Ok(Html(
+        TodayTemplate {
+            summary: stats::today_summary(&db, now)?,
+            hours,
+            hours_max,
+            records: stats::records_today(&db, now)?,
+            new: stats::new_today(&db, now)?,
+            tar1090: tar1090_base(&headers),
+        }
+        .render()?,
+    ))
+}
+
+async fn api_today(State(db): State<Db>) -> Result<Json, AppError> {
+    let now = now();
+    Ok(Json(serde_json::json!({
+        "summary": stats::today_summary(&db, now)?,
+        "hours": stats::hour_histogram(&db, now)?,
+        "records": stats::records_today(&db, now)?,
+        "new": stats::new_today(&db, now)?,
+    })))
+}
+
+#[derive(Template)]
+#[template(path = "activity.html")]
+struct ActivityTemplate {
+    heatmap: stats::Heatmap,
+    /// Hour labels for the heatmap header; empty strings keep the grid aligned.
+    hours: Vec<String>,
+    range: stats::LineChart,
+    messages: stats::LineChart,
+    tar1090: String,
+}
+
+async fn activity_page(State(db): State<Db>, headers: HeaderMap) -> Result<Html<String>, AppError> {
+    let now = now();
+    let heatmap = stats::weekday_hour_heatmap(&db)?;
+    let range = stats::range_by_day(&db, now)?;
+    let messages = stats::messages_by_day(&db, now)?;
+    let hours = (0..24)
+        .map(|h| if h % 3 == 0 { format!("{h:02}") } else { String::new() })
+        .collect();
+    Ok(Html(
+        ActivityTemplate {
+            heatmap,
+            hours,
+            range: stats::LineChart::build(&range),
+            messages: stats::LineChart::build(&messages),
+            tar1090: tar1090_base(&headers),
+        }
+        .render()?,
+    ))
+}
+
+async fn api_activity(State(db): State<Db>) -> Result<Json, AppError> {
+    Ok(Json(serde_json::to_value(stats::activity(&db, now())?)?))
+}
+
 #[derive(Deserialize, Default)]
 struct LimitParams {
     #[serde(default)]
@@ -535,7 +612,7 @@ async fn htmx_js() -> impl IntoResponse {
 
 async fn app_css() -> impl IntoResponse {
     (
-        [(header::CONTENT_TYPE, "text/css"), (header::CACHE_CONTROL, "public, max-age=86400")],
+        [(header::CONTENT_TYPE, "text/css"), (header::CACHE_CONTROL, "no-cache")],
         APP_CSS,
     )
 }

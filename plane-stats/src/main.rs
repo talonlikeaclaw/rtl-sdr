@@ -94,6 +94,17 @@ fn main() {
          CREATE TABLE IF NOT EXISTS poll_hour (
            ts INTEGER PRIMARY KEY,
            max_count INTEGER NOT NULL
+         );
+         CREATE TABLE IF NOT EXISTS day_aircraft (
+           day TEXT NOT NULL,
+           hex TEXT NOT NULL,
+           first_ts REAL NOT NULL,
+           last_ts  REAL NOT NULL,
+           polls INTEGER NOT NULL DEFAULT 1,
+           max_alt_ft INTEGER,
+           max_gs_kts REAL,
+           max_range_nm REAL,
+           PRIMARY KEY (day, hex)
          );",
     )
     .expect("run migrations");
@@ -153,7 +164,8 @@ fn main() {
          CREATE INDEX IF NOT EXISTS aircraft_max_gs     ON aircraft(max_gs_kts DESC, hex);
          CREATE INDEX IF NOT EXISTS aircraft_max_range  ON aircraft(max_range_nm DESC, hex);
          CREATE INDEX IF NOT EXISTS aircraft_max_rssi   ON aircraft(max_rssi_dbfs DESC, hex);
-         CREATE INDEX IF NOT EXISTS emergency_log_hex   ON emergency_log(hex);",
+         CREATE INDEX IF NOT EXISTS emergency_log_hex   ON emergency_log(hex);
+         CREATE INDEX IF NOT EXISTS day_aircraft_hex    ON day_aircraft(hex);",
     )
     .expect("create indexes");
 

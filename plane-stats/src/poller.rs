@@ -92,6 +92,9 @@ pub async fn run(db: Db, source: String) {
 fn record_poll(db: &Db, now: f64, live: &[&Aircraft], messages: i64) -> rusqlite::Result<()> {
     let mut conn = crate::db_lock(db);
     let tx = conn.transaction()?;
+    // Local calendar day for the daily ledger; derived from the poll timestamp
+    // so a poll that straddles midnight is filed under the day it was taken.
+    let day = crate::stats::local_day(now);
 
     {
         let mut stmt = tx.prepare(
@@ -162,6 +165,22 @@ fn record_poll(db: &Db, now: f64, live: &[&Aircraft], messages: i64) -> rusqlite
                SELECT 1 FROM emergency_log WHERE hex = ?2 AND emergency = ?4 AND ts > ?1 - 600
              )",
         )?;
+        // Daily ledger: one row per aircraft per local day, MAX metrics so the
+        // `/today` digest can compare today against every earlier day.
+        let mut day_aircraft = tx.prepare(
+            "INSERT INTO day_aircraft
+               (day, hex, first_ts, last_ts, polls, max_alt_ft, max_gs_kts, max_range_nm)
+             VALUES (?1, ?2, ?3, ?3, 1, ?4, ?5, ?6)
+             ON CONFLICT(day, hex) DO UPDATE SET
+               last_ts = excluded.last_ts,
+               polls = day_aircraft.polls + 1,
+               max_alt_ft = nullif(MAX(ifnull(day_aircraft.max_alt_ft, -2147483648),
+                                       ifnull(excluded.max_alt_ft, -2147483648)), -2147483648),
+               max_gs_kts = nullif(MAX(ifnull(day_aircraft.max_gs_kts, -1e30),
+                                        ifnull(excluded.max_gs_kts, -1e30)), -1e30),
+               max_range_nm = nullif(MAX(ifnull(day_aircraft.max_range_nm, -1e30),
+                                         ifnull(excluded.max_range_nm, -1e30)), -1e30)",
+        )?;
 
         for a in live {
             let hex = a.hex.to_lowercase();
@@ -199,6 +218,8 @@ fn record_poll(db: &Db, now: f64, live: &[&Aircraft], messages: i64) -> rusqlite
                 a.seen,
                 a.db_flags,
             ])?;
+
+            day_aircraft.execute(params![day.as_str(), hex.as_str(), now, alt_ft, a.gs, a.r_dst])?;
 
             let emergency_str = a.emergency.as_deref().filter(|e| *e != "none");
             let emergency_squawk =

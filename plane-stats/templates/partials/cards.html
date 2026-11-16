@@ -15,6 +15,11 @@
     <div class="who">{{ stats.new_last_7d }} in the last 7 days</div>
   </div>
   <div class="card">
+    <div class="num">{{ stats.heard_today }}</div>
+    <div class="sub">heard today</div>
+    <div class="who"><a href="/today">open today's digest →</a></div>
+  </div>
+  <div class="card">
     <div class="num">{{ stats.types_seen }}</div>
     <div class="sub">aircraft types</div>
     <div class="who">{% if let Some(r) = stats.top_type %}top {{ r.hex }} · {{ r.value_str() }}{% else %}no types yet{% endif %}</div>
