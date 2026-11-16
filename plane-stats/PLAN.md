@@ -32,8 +32,12 @@ Built and working:
   full list.
 - Fleet filter chips: `FleetFilter` in `stats.rs` (search, `cat`, `mil`,
   `today`, `new7`, `alt_min`/`alt_max`) compiles to a named-param `WHERE`;
-  chip row in `#fleet-controls`, `filter_suffix` on sort/pager links, and
+  chip row in `#fleet-controls`, carried to the sort headers and pager by
+  `hx-include="#fleet-controls"` (no generated query suffix), and
   `db_flags` stored from tar1090 `dbFlags` (bit 0 = military).
+
+Refresh model (60 s tbody-only tick, `hx-sync`, `poll_hour` rollup, cached
+`stats()`) is documented in `AGENTS.md` under "plane-stats status".
 
 Known loose ends:
 

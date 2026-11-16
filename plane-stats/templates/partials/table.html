@@ -6,72 +6,49 @@
   <thead>
     <tr>
       <th class="{% if sort == "hex" %}active {{ dir }}{% endif %}"
-          hx-get="/partials/table?sort=hex&dir={% if sort == "hex" && dir == "asc" %}desc{% else %}asc{% endif %}{{ filter_suffix }}"
-          hx-target="#fleet">Hex</th>
+          hx-get="/partials/table?sort=hex&dir={% if sort == "hex" && dir == "asc" %}desc{% else %}asc{% endif %}"
+          hx-target="#fleet" hx-include="#fleet-controls">Hex</th>
       <th class="{% if sort == "callsign" %}active {{ dir }}{% endif %}"
-          hx-get="/partials/table?sort=callsign&dir={% if sort == "callsign" && dir == "asc" %}desc{% else %}asc{% endif %}{{ filter_suffix }}"
-          hx-target="#fleet">Callsign</th>
+          hx-get="/partials/table?sort=callsign&dir={% if sort == "callsign" && dir == "asc" %}desc{% else %}asc{% endif %}"
+          hx-target="#fleet" hx-include="#fleet-controls">Callsign</th>
       <th class="{% if sort == "registration" %}active {{ dir }}{% endif %}"
-          hx-get="/partials/table?sort=registration&dir={% if sort == "registration" && dir == "asc" %}desc{% else %}asc{% endif %}{{ filter_suffix }}"
-          hx-target="#fleet">Registration</th>
+          hx-get="/partials/table?sort=registration&dir={% if sort == "registration" && dir == "asc" %}desc{% else %}asc{% endif %}"
+          hx-target="#fleet" hx-include="#fleet-controls">Registration</th>
       <th class="{% if sort == "typecode" %}active {{ dir }}{% endif %}"
-          hx-get="/partials/table?sort=typecode&dir={% if sort == "typecode" && dir == "asc" %}desc{% else %}asc{% endif %}{{ filter_suffix }}"
-          hx-target="#fleet">Type</th>
+          hx-get="/partials/table?sort=typecode&dir={% if sort == "typecode" && dir == "asc" %}desc{% else %}asc{% endif %}"
+          hx-target="#fleet" hx-include="#fleet-controls">Type</th>
       <th>Squawk</th>
       <th>Cat</th>
       <th class="{% if sort == "first_seen" %}active {{ dir }}{% endif %}"
-          hx-get="/partials/table?sort=first_seen&dir={% if sort == "first_seen" && dir == "desc" %}asc{% else %}desc{% endif %}{{ filter_suffix }}"
-          hx-target="#fleet">First seen</th>
+          hx-get="/partials/table?sort=first_seen&dir={% if sort == "first_seen" && dir == "desc" %}asc{% else %}desc{% endif %}"
+          hx-target="#fleet" hx-include="#fleet-controls">First seen</th>
       <th class="{% if sort == "last_seen" %}active {{ dir }}{% endif %}"
-          hx-get="/partials/table?sort=last_seen&dir={% if sort == "last_seen" && dir == "desc" %}asc{% else %}desc{% endif %}{{ filter_suffix }}"
-          hx-target="#fleet">Last seen</th>
+          hx-get="/partials/table?sort=last_seen&dir={% if sort == "last_seen" && dir == "desc" %}asc{% else %}desc{% endif %}"
+          hx-target="#fleet" hx-include="#fleet-controls">Last seen</th>
       <th class="{% if sort == "sightings" %}active {{ dir }}{% endif %}"
-          hx-get="/partials/table?sort=sightings&dir={% if sort == "sightings" && dir == "desc" %}asc{% else %}desc{% endif %}{{ filter_suffix }}"
-          hx-target="#fleet">Polls seen</th>
+          hx-get="/partials/table?sort=sightings&dir={% if sort == "sightings" && dir == "desc" %}asc{% else %}desc{% endif %}"
+          hx-target="#fleet" hx-include="#fleet-controls">Polls seen</th>
       <th class="{% if sort == "max_alt_ft" %}active {{ dir }}{% endif %}"
-          hx-get="/partials/table?sort=max_alt_ft&dir={% if sort == "max_alt_ft" && dir == "desc" %}asc{% else %}desc{% endif %}{{ filter_suffix }}"
-          hx-target="#fleet">Max alt (ft)</th>
+          hx-get="/partials/table?sort=max_alt_ft&dir={% if sort == "max_alt_ft" && dir == "desc" %}asc{% else %}desc{% endif %}"
+          hx-target="#fleet" hx-include="#fleet-controls">Max alt (ft)</th>
       <th class="{% if sort == "max_gs_kts" %}active {{ dir }}{% endif %}"
-          hx-get="/partials/table?sort=max_gs_kts&dir={% if sort == "max_gs_kts" && dir == "desc" %}asc{% else %}desc{% endif %}{{ filter_suffix }}"
-          hx-target="#fleet">Max speed (kt)</th>
+          hx-get="/partials/table?sort=max_gs_kts&dir={% if sort == "max_gs_kts" && dir == "desc" %}asc{% else %}desc{% endif %}"
+          hx-target="#fleet" hx-include="#fleet-controls">Max speed (kt)</th>
       <th class="{% if sort == "max_range_nm" %}active {{ dir }}{% endif %}"
-          hx-get="/partials/table?sort=max_range_nm&dir={% if sort == "max_range_nm" && dir == "desc" %}asc{% else %}desc{% endif %}{{ filter_suffix }}"
-          hx-target="#fleet">Max range (nm)</th>
+          hx-get="/partials/table?sort=max_range_nm&dir={% if sort == "max_range_nm" && dir == "desc" %}asc{% else %}desc{% endif %}"
+          hx-target="#fleet" hx-include="#fleet-controls">Max range (nm)</th>
       <th>Map</th>
     </tr>
   </thead>
-  <tbody>
-    {% for a in rows %}
-    <tr>
-      <td><a href="/aircraft/{{ a.hex }}">{{ a.hex }}</a></td>
-      <td>{{ a.last_flight.as_deref().unwrap_or("") }}</td>
-      <td>{% if let Some(v) = a.registration %}{{ v }}{% else %}-{% endif %}</td>
-      <td class="mono">{% if let Some(v) = a.typecode %}{{ v }}{% else %}-{% endif %}</td>
-      <td>{% if let Some(v) = a.last_squawk %}{{ v }}{% else %}-{% endif %}</td>
-      <td>{% if let Some(v) = a.last_category %}{{ v }}{% else %}-{% endif %}</td>
-      <td>{{ a.first_seen_str() }}</td>
-      <td>{{ a.last_seen_str() }}</td>
-      <td>{{ a.sightings }}</td>
-      <td>{% if let Some(v) = a.max_alt_ft %}{{ v }}{% else %}-{% endif %}</td>
-      <td>{% if let Some(v) = a.max_gs_kts %}{{ v }}{% else %}-{% endif %}</td>
-      <td>{% if let Some(v) = a.max_range_nm %}{{ v }}{% else %}-{% endif %}</td>
-      <td class="links">
-        {% if a.is_live(now) %}
-        <a href="{{ a.map_url(tar1090.as_str()) }}" target="_blank" rel="noopener">map</a>
-        <a href="{{ a.trace_url(tar1090.as_str()) }}" target="_blank" rel="noopener">trace</a>
-        {% else %}-{% endif %}
-      </td>
-    </tr>
-    {% endfor %}
-  </tbody>
+  <tbody id="fleet-rows">{% include "partials/table_rows.html" %}</tbody>
 </table>
 </div>
 <div class="pager" hx-disinherit="hx-include">
   {% if let Some(p) = prev_page %}
-  <a class="pager-link" hx-get="/partials/table?sort={{ sort }}&dir={{ dir }}&page={{ p }}{{ filter_suffix }}" hx-target="#fleet">Prev</a>
+  <a class="pager-link" hx-get="/partials/table?sort={{ sort }}&dir={{ dir }}&page={{ p }}" hx-target="#fleet" hx-include="#fleet-controls">Prev</a>
   {% else %}<span class="pager-link disabled">Prev</span>{% endif %}
   <span class="pager-info">{% if total > 0 %}{{ from_row }}–{{ to_row }} of {{ total }}{% else %}no aircraft{% endif %} · page {{ page }} of {{ pages }}</span>
   {% if let Some(p) = next_page %}
-  <a class="pager-link" hx-get="/partials/table?sort={{ sort }}&dir={{ dir }}&page={{ p }}{{ filter_suffix }}" hx-target="#fleet">Next</a>
+  <a class="pager-link" hx-get="/partials/table?sort={{ sort }}&dir={{ dir }}&page={{ p }}" hx-target="#fleet" hx-include="#fleet-controls">Next</a>
   {% else %}<span class="pager-link disabled">Next</span>{% endif %}
 </div>

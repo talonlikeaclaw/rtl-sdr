@@ -1,6 +1,6 @@
 use std::sync::{Arc, Mutex};
 
-use rusqlite::Connection;
+use rusqlite::{Connection, OptionalExtension};
 
 mod enrichment;
 mod poller;
@@ -8,6 +8,12 @@ mod stats;
 mod web;
 
 pub type Db = Arc<Mutex<Connection>>;
+
+/// Lock the shared connection, recovering from a poisoned mutex instead of
+/// panicking: one panic must not take every later DB read down with it.
+pub fn db_lock(db: &Db) -> std::sync::MutexGuard<'_, Connection> {
+    db.lock().unwrap_or_else(std::sync::PoisonError::into_inner)
+}
 
 fn main() {
     tracing_subscriber::fmt()
@@ -84,6 +90,10 @@ fn main() {
            squawk TEXT,
            emergency TEXT NOT NULL,
            PRIMARY KEY (ts, hex)
+         );
+         CREATE TABLE IF NOT EXISTS poll_hour (
+           ts INTEGER PRIMARY KEY,
+           max_count INTEGER NOT NULL
          );",
     )
     .expect("run migrations");
@@ -133,6 +143,37 @@ fn main() {
         }
     }
 
+    // The fleet table sorts by any of these columns; without an index every
+    // page is a full scan plus sort of the whole table.
+    conn.execute_batch(
+        "CREATE INDEX IF NOT EXISTS aircraft_last_seen  ON aircraft(last_seen DESC, hex);
+         CREATE INDEX IF NOT EXISTS aircraft_first_seen ON aircraft(first_seen DESC, hex);
+         CREATE INDEX IF NOT EXISTS aircraft_sightings  ON aircraft(sightings DESC, hex);
+         CREATE INDEX IF NOT EXISTS aircraft_max_alt    ON aircraft(max_alt_ft DESC, hex);
+         CREATE INDEX IF NOT EXISTS aircraft_max_gs     ON aircraft(max_gs_kts DESC, hex);
+         CREATE INDEX IF NOT EXISTS aircraft_max_range  ON aircraft(max_range_nm DESC, hex);
+         CREATE INDEX IF NOT EXISTS aircraft_max_rssi   ON aircraft(max_rssi_dbfs DESC, hex);
+         CREATE INDEX IF NOT EXISTS emergency_log_hex   ON emergency_log(hex);",
+    )
+    .expect("create indexes");
+
+    // `poll_hour` is the hourly rollup the cards read instead of grouping the
+    // whole `poll_log` every 10 s. Fill it once from the existing log.
+    let backfilled = conn
+        .query_row("SELECT 1 FROM enrichment_meta WHERE key = 'poll_hour_v1'", [], |_| Ok(()))
+        .optional()
+        .expect("poll_hour meta")
+        .is_some();
+    if !backfilled {
+        conn.execute_batch(
+            "DELETE FROM poll_hour;
+             INSERT INTO poll_hour (ts, max_count)
+               SELECT CAST(ts / 3600 AS INTEGER) * 3600, MAX(aircraft_count) FROM poll_log GROUP BY 1;
+             INSERT OR REPLACE INTO enrichment_meta (key, value) VALUES ('poll_hour_v1', '1');",
+        )
+        .expect("backfill poll_hour");
+    }
+
     let db: Db = Arc::new(Mutex::new(conn));
 
     match (
@@ -149,6 +190,11 @@ fn main() {
             tracing::info!("enrichment unchanged ({n} rows), skipping reload")
         }
         Err(e) => tracing::warn!("enrichment load failed: {e}"),
+    }
+
+    // The 520k-row enrichment insert leaves a WAL as large as the database.
+    if let Err(e) = crate::db_lock(&db).execute_batch("PRAGMA wal_checkpoint(TRUNCATE)") {
+        tracing::warn!("wal checkpoint failed: {e}");
     }
 
     let source =

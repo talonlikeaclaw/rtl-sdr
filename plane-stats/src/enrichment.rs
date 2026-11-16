@@ -51,7 +51,7 @@ pub fn load(db: &Db) -> Result<Outcome, Box<dyn std::error::Error>> {
     let stamp = stamp_for(&path)?;
 
     {
-        let conn = db.lock().expect("db mutex");
+        let conn = crate::db_lock(db);
         let previous: Option<String> = conn
             .query_row("SELECT value FROM enrichment_meta WHERE key = 'csv'", [], |r| r.get(0))
             .optional()?;
@@ -84,7 +84,7 @@ pub fn load(db: &Db) -> Result<Outcome, Box<dyn std::error::Error>> {
         rows.push(row);
     }
 
-    let mut conn = db.lock().expect("db mutex");
+    let mut conn = crate::db_lock(db);
     let tx = conn.transaction()?;
     tx.execute("DELETE FROM enrichment", [])?;
     let col_names: Vec<&str> = COLS.iter().map(|(_, c)| *c).collect();

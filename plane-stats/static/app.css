@@ -354,6 +354,19 @@ h1 {
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04);
 }
 
+/* Live panel: a changing row count must not push the page below it. */
+.live-wrap {
+  max-height: 40vh;
+  overflow-y: auto;
+  scrollbar-gutter: stable;
+}
+.live-wrap thead th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: rgba(10, 14, 21, 0.94);
+}
+
 table {
   width: 100%;
   border-collapse: collapse;

@@ -82,7 +82,7 @@
               <tr><th>Max speed (kt)</th><td>{% if let Some(v) = row.max_gs_kts %}{{ v }}{% else %}-{% endif %}</td></tr>
               <tr><th>Max range (nm)</th><td>{% if let Some(v) = row.max_range_nm %}{{ v }}{% else %}-{% endif %}</td></tr>
               <tr><th>Strongest signal (dBFS)</th><td>{% if let Some(v) = row.max_rssi_dbfs %}{{ v }}{% else %}-{% endif %}</td></tr>
-              <tr><th>Max climb (ft/min)</th><td>{% if let Some(v) = row.max_baro_rate %}+{{ v }}{% else %}-{% endif %}</td></tr>
+              <tr><th>Max climb (ft/min)</th><td>{{ row.max_climb_str() }}</td></tr>
               <tr><th>Max descent (ft/min)</th><td>{% if let Some(v) = row.min_baro_rate %}{{ v }}{% else %}-{% endif %}</td></tr>
             </tbody>
           </table>
@@ -98,7 +98,7 @@
               <tr><th>Track</th><td>{{ row.track_str() }}</td></tr>
               <tr><th>Selected altitude (ft)</th><td>{{ row.nav_alt_str() }}</td></tr>
               <tr><th>Selected heading</th><td>{{ row.nav_hdg_str() }}</td></tr>
-              <tr><th>Emergency</th><td>{% if row.emergency_active() %}<span class="emergency">{{ row.emergency_str() }}</span>{% else %}{{ row.emergency_str() }}{% endif %}</td></tr>
+              <tr><th>Emergency</th><td>{% if row.is_live(now) && row.emergency_active() %}<span class="emergency">{{ row.emergency_str() }}</span>{% else %}{{ row.emergency_str() }}{% endif %}</td></tr>
             </tbody>
           </table>
         </div>

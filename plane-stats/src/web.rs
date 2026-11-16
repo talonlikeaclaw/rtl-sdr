@@ -18,6 +18,7 @@ pub fn router(db: Db) -> Router {
         .route("/aircraft/:hex", get(aircraft_profile))
         .route("/api/aircraft/:hex", get(api_aircraft_hex))
         .route("/partials/table", get(table_partial))
+        .route("/partials/table/rows", get(table_rows_partial))
         .route("/partials/cards", get(cards_partial))
         .route("/partials/emergencies", get(emergencies_partial))
         .route("/partials/live", get(live_partial))
@@ -28,6 +29,8 @@ pub fn router(db: Db) -> Router {
         .route("/htmx.min.js", get(htmx_js))
         .route("/app.css", get(app_css))
         .with_state(db)
+        // The fleet table and `/api/aircraft` are a few hundred KB of markup.
+        .layer(tower_http::compression::CompressionLayer::new())
 }
 
 fn now() -> f64 {
@@ -78,13 +81,13 @@ fn ts(epoch: f64) -> String {
 struct IndexTemplate {
     stats: Stats,
     rows: Vec<AircraftRow>,
+    live: Vec<AircraftRow>,
     recent: Vec<AircraftRow>,
     emergencies: Vec<stats::EmergencyRow>,
     sort: String,
     dir: String,
     q: String,
     filter: stats::FleetFilter,
-    filter_suffix: String,
     tar1090: String,
     now: f64,
     rx: Option<(f64, f64)>,
@@ -136,23 +139,27 @@ fn paginate(
     })
 }
 
-async fn index(
-    State(db): State<Db>,
-    Query(q): Query<SortParams>,
-    headers: HeaderMap,
-) -> Result<Html<String>, AppError> {
+/// Everything the fleet table needs, resolved once for both the page and the
+/// partial endpoints.
+struct FleetView {
+    nav: PageNav,
+    rows: Vec<AircraftRow>,
+    sort: String,
+    dir: String,
+    filter: stats::FleetFilter,
+}
+
+fn fleet_view(db: &Db, q: &SortParams, now: f64) -> Result<FleetView, AppError> {
     let sort = if stats::is_valid_sort(&q.sort) { q.sort.clone() } else { "last_seen".to_string() };
     let dir = if stats::is_valid_dir(&q.dir) {
         q.dir.clone()
     } else {
         stats::sort_column(&sort).1.to_string()
     };
-    let now = now();
     let filter = q.filter();
-    let filter_suffix = filter.query_suffix();
-    let nav = paginate(&db, q.page, &filter, now)?;
+    let nav = paginate(db, q.page, &filter, now)?;
     let rows = stats::aircraft_sorted(
-        &db,
+        db,
         &sort,
         &dir,
         &filter,
@@ -160,30 +167,41 @@ async fn index(
         (nav.page - 1) * stats::PAGE_SIZE,
         now,
     )?;
-    let st = stats::stats(&db, now)?;
+    Ok(FleetView { nav, rows, sort, dir, filter })
+}
+
+async fn index(
+    State(db): State<Db>,
+    Query(q): Query<SortParams>,
+    headers: HeaderMap,
+) -> Result<Html<String>, AppError> {
+    let now = now();
+    let view = fleet_view(&db, &q, now)?;
+    let st = stats::stats_cached(&db, now)?;
+    let live = stats::live_aircraft(&db, now)?;
     let recent = stats::recent_arrivals(&db)?;
     let emergencies = stats::emergency_log(&db, 20)?;
     Ok(Html(
         IndexTemplate {
             stats: st,
-            rows,
+            rows: view.rows,
+            live,
             recent,
             emergencies,
-            sort,
-            dir,
+            sort: view.sort,
+            dir: view.dir,
             q: q.q.clone(),
-            filter,
-            filter_suffix,
+            filter: view.filter,
             tar1090: tar1090_base(&headers),
             now,
             rx: stats::rx_pos(),
-            page: nav.page,
-            pages: nav.pages,
-            total: nav.total,
-            from_row: nav.from_row,
-            to_row: nav.to_row,
-            prev_page: nav.prev_page,
-            next_page: nav.next_page,
+            page: view.nav.page,
+            pages: view.nav.pages,
+            total: view.nav.total,
+            from_row: view.nav.from_row,
+            to_row: view.nav.to_row,
+            prev_page: view.nav.prev_page,
+            next_page: view.nav.next_page,
         }
         .render()?,
     ))
@@ -256,7 +274,6 @@ struct TableTemplate {
     rows: Vec<AircraftRow>,
     sort: String,
     dir: String,
-    filter_suffix: String,
     tar1090: String,
     now: f64,
     page: u32,
@@ -273,42 +290,46 @@ async fn table_partial(
     Query(q): Query<SortParams>,
     headers: HeaderMap,
 ) -> Result<Html<String>, AppError> {
-    let sort = if stats::is_valid_sort(&q.sort) { q.sort.clone() } else { "last_seen".to_string() };
-    let dir = if stats::is_valid_dir(&q.dir) {
-        q.dir.clone()
-    } else {
-        stats::sort_column(&sort).1.to_string()
-    };
     let now = now();
-    let filter = q.filter();
-    let filter_suffix = filter.query_suffix();
-    let nav = paginate(&db, q.page, &filter, now)?;
-    let rows = stats::aircraft_sorted(
-        &db,
-        &sort,
-        &dir,
-        &filter,
-        stats::PAGE_SIZE,
-        (nav.page - 1) * stats::PAGE_SIZE,
-        now,
-    )?;
+    let view = fleet_view(&db, &q, now)?;
     Ok(Html(
         TableTemplate {
-            rows,
-            sort,
-            dir,
-            filter_suffix,
+            rows: view.rows,
+            sort: view.sort,
+            dir: view.dir,
             tar1090: tar1090_base(&headers),
             now,
-            page: nav.page,
-            pages: nav.pages,
-            total: nav.total,
-            from_row: nav.from_row,
-            to_row: nav.to_row,
-            prev_page: nav.prev_page,
-            next_page: nav.next_page,
+            page: view.nav.page,
+            pages: view.nav.pages,
+            total: view.nav.total,
+            from_row: view.nav.from_row,
+            to_row: view.nav.to_row,
+            prev_page: view.nav.prev_page,
+            next_page: view.nav.next_page,
         }
         .render()?,
+    ))
+}
+
+/// Rows only, for the periodic refresh: swapping just the `<tbody>` keeps the
+/// table's horizontal scroll position and does not touch the headers.
+#[derive(Template)]
+#[template(path = "partials/table_rows.html")]
+struct TableRowsTemplate {
+    rows: Vec<AircraftRow>,
+    tar1090: String,
+    now: f64,
+}
+
+async fn table_rows_partial(
+    State(db): State<Db>,
+    Query(q): Query<SortParams>,
+    headers: HeaderMap,
+) -> Result<Html<String>, AppError> {
+    let now = now();
+    let view = fleet_view(&db, &q, now)?;
+    Ok(Html(
+        TableRowsTemplate { rows: view.rows, tar1090: tar1090_base(&headers), now }.render()?,
     ))
 }
 
@@ -319,7 +340,7 @@ struct CardsTemplate {
 }
 
 async fn cards_partial(State(db): State<Db>) -> Result<Html<String>, AppError> {
-    Ok(Html(CardsTemplate { stats: stats::stats(&db, now())? }.render()?))
+    Ok(Html(CardsTemplate { stats: stats::stats_cached(&db, now())? }.render()?))
 }
 
 #[derive(Template)]
@@ -335,7 +356,7 @@ async fn emergencies_partial(State(db): State<Db>) -> Result<Html<String>, AppEr
 #[derive(Template)]
 #[template(path = "partials/live.html")]
 struct LiveTemplate {
-    rows: Vec<AircraftRow>,
+    live: Vec<AircraftRow>,
     tar1090: String,
     rx: Option<(f64, f64)>,
 }
@@ -344,7 +365,7 @@ async fn live_partial(State(db): State<Db>, headers: HeaderMap) -> Result<Html<S
     let now = now();
     Ok(Html(
         LiveTemplate {
-            rows: stats::live_aircraft(&db, now)?,
+            live: stats::live_aircraft(&db, now)?,
             tar1090: tar1090_base(&headers),
             rx: stats::rx_pos(),
         }
@@ -470,19 +491,19 @@ async fn api_aircraft_hex(
 impl From<rusqlite::Error> for AppError {
     fn from(e: rusqlite::Error) -> Self {
         tracing::error!("db: {e}");
-        AppError(StatusCode::INTERNAL_SERVER_ERROR, e.to_string())
+        AppError(StatusCode::INTERNAL_SERVER_ERROR, "internal error".into())
     }
 }
 impl From<askama::Error> for AppError {
     fn from(e: askama::Error) -> Self {
         tracing::error!("template: {e}");
-        AppError(StatusCode::INTERNAL_SERVER_ERROR, e.to_string())
+        AppError(StatusCode::INTERNAL_SERVER_ERROR, "internal error".into())
     }
 }
 impl From<serde_json::Error> for AppError {
     fn from(e: serde_json::Error) -> Self {
         tracing::error!("json: {e}");
-        AppError(StatusCode::INTERNAL_SERVER_ERROR, e.to_string())
+        AppError(StatusCode::INTERNAL_SERVER_ERROR, "internal error".into())
     }
 }
 async fn api_stats(State(db): State<Db>) -> Result<Json, AppError> {
@@ -495,16 +516,28 @@ async fn api_stats(State(db): State<Db>) -> Result<Json, AppError> {
 struct Json(serde_json::Value);
 impl IntoResponse for Json {
     fn into_response(self) -> Response {
-        ([(header::CONTENT_TYPE, "application/json")], self.0.to_string()).into_response()
+        match serde_json::to_vec(&self.0) {
+            Ok(body) => ([(header::CONTENT_TYPE, "application/json")], body).into_response(),
+            Err(e) => AppError::from(e).into_response(),
+        }
     }
 }
 
 async fn htmx_js() -> impl IntoResponse {
-    ([(header::CONTENT_TYPE, "text/javascript")], HTMX.to_vec())
+    (
+        [
+            (header::CONTENT_TYPE, "text/javascript"),
+            (header::CACHE_CONTROL, "public, max-age=86400"),
+        ],
+        HTMX,
+    )
 }
 
 async fn app_css() -> impl IntoResponse {
-    ([(header::CONTENT_TYPE, "text/css")], APP_CSS.to_vec())
+    (
+        [(header::CONTENT_TYPE, "text/css"), (header::CACHE_CONTROL, "public, max-age=86400")],
+        APP_CSS,
+    )
 }
 
 struct AppError(StatusCode, String);

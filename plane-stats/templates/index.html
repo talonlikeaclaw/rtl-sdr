@@ -43,14 +43,14 @@
 
       <section class="glass panel" aria-label="Overhead now">
         <h2>Overhead now</h2>
-        <div class="table-wrap">
-          <div id="live" hx-get="/partials/live" hx-trigger="every 5s">
+        <div class="table-wrap live-wrap">
+          <div id="live" hx-get="/partials/live" hx-trigger="load, every 5s [document.visibilityState === 'visible']">
             {% include "partials/live.html" %}
           </div>
         </div>
       </section>
 
-      <section class="glass panel" aria-label="All-time fleet">
+      <section class="glass panel" aria-label="All-time fleet" id="fleet-panel" hx-sync="#fleet-panel:replace">
         <h2>All-time fleet</h2>
         <form id="fleet-controls" hx-get="/partials/table" hx-target="#fleet"
               hx-include="#fleet-sort, #fleet-dir">
@@ -159,9 +159,14 @@
             </div>
           </div>
         </form>
-        <div id="fleet" hx-get="/partials/table" hx-trigger="every 10s" hx-include="#fleet-controls, #fleet-page, #fleet-sort, #fleet-dir">
+        <div id="fleet">
           {% include "partials/table.html" %}
         </div>
+        <div id="fleet-tick" hx-get="/partials/table/rows"
+             hx-trigger="every 60s [document.activeElement.id !== 'fleet-search' && document.visibilityState === 'visible']"
+             hx-target="#fleet-rows" hx-swap="innerHTML"
+             hx-sync="#fleet-panel:queue last"
+             hx-include="#fleet-controls, #fleet-page, #fleet-sort, #fleet-dir"></div>
       </section>
 
       <section class="glass panel" aria-label="Recent new arrivals">

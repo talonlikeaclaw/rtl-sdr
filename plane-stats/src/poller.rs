@@ -90,7 +90,7 @@ pub async fn run(db: Db, source: String) {
 }
 
 fn record_poll(db: &Db, now: f64, live: &[&Aircraft], messages: i64) -> rusqlite::Result<()> {
-    let mut conn = db.lock().expect("db mutex");
+    let mut conn = crate::db_lock(db);
     let tx = conn.transaction()?;
 
     {
@@ -153,11 +153,18 @@ fn record_poll(db: &Db, now: f64, live: &[&Aircraft], messages: i64) -> rusqlite
         let mut visit_extend = tx.prepare(
             "UPDATE visits SET end_ts = ?1, polls = polls + 1 WHERE hex = ?2 AND start_ts = ?3",
         )?;
+        // One row per emergency episode: a 10-minute emergency squawk would
+        // otherwise log ~60 rows at the 10 s poll rate.
         let mut emergency = tx.prepare(
-            "INSERT OR REPLACE INTO emergency_log (ts, hex, squawk, emergency) VALUES (?1, ?2, ?3, ?4)",
+            "INSERT INTO emergency_log (ts, hex, squawk, emergency)
+             SELECT ?1, ?2, ?3, ?4
+             WHERE NOT EXISTS (
+               SELECT 1 FROM emergency_log WHERE hex = ?2 AND emergency = ?4 AND ts > ?1 - 600
+             )",
         )?;
 
         for a in live {
+            let hex = a.hex.to_lowercase();
             let alt_ft = match &a.alt_baro {
                 Some(Alt::Ft(ft)) => Some(*ft as i64),
                 Some(Alt::Ground(_)) => None,
@@ -172,7 +179,7 @@ fn record_poll(db: &Db, now: f64, live: &[&Aircraft], messages: i64) -> rusqlite
             };
             let flight = a.flight.as_deref().map(str::trim).filter(|s| !s.is_empty());
             stmt.execute(params![
-                a.hex.to_lowercase(),
+                hex.as_str(),
                 now,
                 flight,
                 a.squawk,
@@ -199,28 +206,28 @@ fn record_poll(db: &Db, now: f64, live: &[&Aircraft], messages: i64) -> rusqlite
             if emergency_str.is_some() || emergency_squawk.is_some() {
                 emergency.execute(params![
                     now,
-                    a.hex.to_lowercase(),
+                    hex.as_str(),
                     a.squawk,
                     emergency_str.unwrap_or("squawk"),
                 ])?;
             }
 
             if let Some(cs) = flight {
-                callsigns.execute(params![a.hex.to_lowercase(), cs, now])?;
+                callsigns.execute(params![hex.as_str(), cs, now])?;
             }
 
             let last: Option<(f64, f64)> = last_visit
-                .query_row(params![a.hex.to_lowercase()], |r| Ok((r.get(0)?, r.get(1)?)))
+                .query_row(params![hex.as_str()], |r| Ok((r.get(0)?, r.get(1)?)))
                 .optional()?;
             match last {
                 None => {
-                    visits.execute(params![a.hex.to_lowercase(), now])?;
+                    visits.execute(params![hex.as_str(), now])?;
                 }
                 Some((start_ts, end_ts)) if now - end_ts > VISIT_GAP_SECS => {
-                    visits.execute(params![a.hex.to_lowercase(), now])?;
+                    visits.execute(params![hex.as_str(), now])?;
                 }
                 Some((start_ts, _)) => {
-                    visit_extend.execute(params![now, a.hex.to_lowercase(), start_ts])?;
+                    visit_extend.execute(params![now, hex.as_str(), start_ts])?;
                 }
             }
         }
@@ -230,13 +237,25 @@ fn record_poll(db: &Db, now: f64, live: &[&Aircraft], messages: i64) -> rusqlite
         "INSERT OR REPLACE INTO poll_log (ts, aircraft_count, messages) VALUES (?1, ?2, ?3)",
         params![now, live.len() as i64, messages],
     )?;
+    // Hourly rollup the cards read; keeps them off a full `poll_log` scan.
+    tx.execute(
+        "INSERT INTO poll_hour (ts, max_count)
+         VALUES (CAST(?1 / 3600 AS INTEGER) * 3600, ?2)
+         ON CONFLICT(ts) DO UPDATE SET max_count = MAX(max_count, excluded.max_count)",
+        params![now, live.len() as i64],
+    )?;
     tx.commit()
 }
 
 fn prune(db: &Db, now: f64) -> rusqlite::Result<()> {
-    let conn = db.lock().expect("db mutex");
+    let conn = crate::db_lock(db);
     let cutoff = now - PRUNE_AFTER_DAYS * 86_400.0;
     let n = conn.execute("DELETE FROM poll_log WHERE ts < ?1", params![cutoff])?;
+    conn.execute("DELETE FROM poll_hour WHERE ts < ?1", params![cutoff])?;
     tracing::info!("pruned {n} poll_log rows older than {PRUNE_AFTER_DAYS} days");
+    // Return the freed pages' WAL back to the filesystem.
+    if let Err(e) = conn.execute_batch("PRAGMA wal_checkpoint(TRUNCATE)") {
+        tracing::warn!("wal checkpoint failed: {e}");
+    }
     Ok(())
 }

@@ -116,6 +116,31 @@ Military, Interesting and Privacy rows only match once re-seen: `db_flags` was
 added after the fact, so older rows are NULL until the aircraft flies past
 again (tar1090 omits `dbFlags` when it is 0, hence the `coalesce` on upsert).
 
+Refresh model (do not "simplify" back to a whole-table tick):
+
+- The fleet table's periodic refresh is 60 s, fetches `/partials/table/rows` and
+  swaps only `#fleet-rows` (the `<tbody>`), so the table's horizontal scroll and
+  the user's in-flight filters survive. It is suppressed while `#fleet-search`
+  has focus and while the tab is hidden (`hx-trigger` filter).
+- Every fleet control carries `hx-sync="#fleet-panel:replace"` (inherited from
+  the section), so the newest request wins and stale responses cannot overwrite
+  a fresh one. The tick overrides that with `queue last` so it never aborts a
+  user request.
+- Filter state travels in request bodies (`hx-include="#fleet-controls"`), not
+  in generated `filter_suffix` query strings.
+- The live panel is capped at `40vh` (`.live-wrap`) and server-renders
+  `live_aircraft()` via the `live` template field — the include must never
+  resolve to `rows` (the fleet page), or the first tick collapses the panel.
+- `stats()` is cached for 10 s (`stats_cached`) because it is 16 all-time
+  aggregates; `/api/stats` stays uncached.
+- `poll_hour` is the hourly `MAX(aircraft_count)` rollup the cards read instead
+  of grouping `poll_log`; the poller maintains it in the same transaction as
+  `poll_log`, `prune` trims it, and `enrichment_meta.key = 'poll_hour_v1'`
+  guards the one-shot backfill. Add a new key (v2) if the backfill must rerun.
+- The three `aircraft ⋈ enrichment` aggregates use `CROSS JOIN` on purpose:
+  with a plain `JOIN` SQLite scans all ~520k enrichment rows (`SCAN e`) instead
+  of the ~350 aircraft rows (605 ms → 10 ms).
+
 Detailed step-by-step plan for the remaining work: `plane-stats/PLAN.md`.
 
 Remaining ideas (ranked by value-to-effort):

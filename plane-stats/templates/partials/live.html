@@ -13,10 +13,10 @@
     </tr>
   </thead>
   <tbody>
-    {% if rows.is_empty() %}
+    {% if live.is_empty() %}
     <tr><td colspan="9">Nothing overhead right now.</td></tr>
     {% endif %}
-    {% for a in rows %}
+    {% for a in live %}
     <tr>
       <td><a href="/aircraft/{{ a.hex }}">{% if let Some(cs) = a.last_flight %}{{ cs }}{% else %}{{ a.hex }}{% endif %}</a></td>
       <td class="mono">{% if let Some(v) = a.typecode %}{{ v }}{% else %}-{% endif %}</td>

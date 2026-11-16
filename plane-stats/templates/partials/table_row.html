@@ -1,0 +1,20 @@
+    <tr>
+      <td><a href="/aircraft/{{ a.hex }}">{{ a.hex }}</a></td>
+      <td>{{ a.last_flight.as_deref().unwrap_or("") }}</td>
+      <td>{% if let Some(v) = a.registration %}{{ v }}{% else %}-{% endif %}</td>
+      <td class="mono">{% if let Some(v) = a.typecode %}{{ v }}{% else %}-{% endif %}</td>
+      <td>{% if let Some(v) = a.last_squawk %}{{ v }}{% else %}-{% endif %}</td>
+      <td>{% if let Some(v) = a.last_category %}{{ v }}{% else %}-{% endif %}</td>
+      <td>{{ a.first_seen_str() }}</td>
+      <td>{{ a.last_seen_str() }}</td>
+      <td>{{ a.sightings }}</td>
+      <td>{% if let Some(v) = a.max_alt_ft %}{{ v }}{% else %}-{% endif %}</td>
+      <td>{% if let Some(v) = a.max_gs_kts %}{{ v }}{% else %}-{% endif %}</td>
+      <td>{% if let Some(v) = a.max_range_nm %}{{ v }}{% else %}-{% endif %}</td>
+      <td class="links">
+        {% if a.is_live(now) %}
+        <a href="{{ a.map_url(tar1090.as_str()) }}" target="_blank" rel="noopener">map</a>
+        <a href="{{ a.trace_url(tar1090.as_str()) }}" target="_blank" rel="noopener">trace</a>
+        {% else %}-{% endif %}
+      </td>
+    </tr>

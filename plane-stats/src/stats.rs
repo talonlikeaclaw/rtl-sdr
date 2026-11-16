@@ -1,4 +1,4 @@
-use chrono::TimeZone;
+use chrono::Timelike;
 use rusqlite::types::Value;
 use rusqlite::{params, Connection, OptionalExtension, Row};
 
@@ -142,6 +142,11 @@ impl AircraftRow {
     pub fn climb_str(&self) -> String {
         self.last_baro_rate.map(|v| format!("{v:+.0}")).unwrap_or_else(|| "-".into())
     }
+    /// All-time max climb with an explicit sign: an aircraft that only ever
+    /// descended has a negative max, which must not render as `+-1200`.
+    pub fn max_climb_str(&self) -> String {
+        self.max_baro_rate.map(|v| format!("{v:+}")).unwrap_or_else(|| "-".into())
+    }
     pub fn age_str(&self) -> String {
         self.last_msg_age.map(|v| format!("{v:.0}")).unwrap_or_else(|| "-".into())
     }
@@ -284,31 +289,27 @@ pub struct FleetFilter {
 
 /// Local midnight as an epoch timestamp, matching the cards' "today" bucket.
 fn local_today_start() -> f64 {
-    chrono::Local::now()
-        .date_naive()
-        .and_hms_opt(0, 0, 0)
-        .expect("midnight")
-        .and_local_timezone(chrono::Local)
-        .single()
-        .expect("unambiguous local midnight")
-        .timestamp() as f64
+    let now = chrono::Local::now();
+    let midnight = now.date_naive().and_hms_opt(0, 0, 0).expect("valid midnight");
+    // A DST transition can make local midnight ambiguous or nonexistent; fall
+    // back to subtracting the elapsed seconds of the day instead of panicking
+    // while the DB mutex is held.
+    midnight.and_local_timezone(chrono::Local).earliest().map_or_else(
+        || now.timestamp() as f64 - f64::from(now.time().num_seconds_from_midnight()),
+        |dt| dt.timestamp() as f64,
+    )
 }
 
 fn fleet_needle(search: &str) -> String {
-    format!("%{}%", search.trim().to_lowercase())
-}
-
-/// Percent-encode every byte outside the unreserved set so a needle survives
-/// `&`, `=`, `#`, spaces, and non-ASCII inside a link.
-fn urlencode(s: &str) -> String {
-    let mut out = String::with_capacity(s.len());
-    for b in s.bytes() {
-        if b.is_ascii_alphanumeric() || matches!(b, b'-' | b'_' | b'.' | b'~') {
-            out.push(b as char);
-        } else {
-            out.push_str(&format!("%{b:02X}"));
+    let mut out = String::with_capacity(search.len() + 2);
+    out.push('%');
+    for ch in search.trim().to_lowercase().chars() {
+        if matches!(ch, '\\' | '%' | '_') {
+            out.push('\\');
         }
+        out.push(ch);
     }
+    out.push('%');
     out
 }
 
@@ -331,9 +332,10 @@ impl FleetFilter {
 
         if !self.q.trim().is_empty() {
             clauses.push(
-                "(a.hex LIKE :q OR a.last_flight LIKE :q
-                  OR e.registration LIKE :q OR e.model LIKE :q OR e.typecode LIKE :q
-                  OR e.owner LIKE :q OR e.operator LIKE :q)",
+                "(a.hex LIKE :q ESCAPE '\\' OR a.last_flight LIKE :q ESCAPE '\\'
+                  OR e.registration LIKE :q ESCAPE '\\' OR e.model LIKE :q ESCAPE '\\'
+                  OR e.typecode LIKE :q ESCAPE '\\'
+                  OR e.owner LIKE :q ESCAPE '\\' OR e.operator LIKE :q ESCAPE '\\')",
             );
             params.push((":q", Value::Text(fleet_needle(&self.q))));
         }
@@ -383,52 +385,6 @@ impl FleetFilter {
             if clauses.is_empty() { String::new() } else { format!("WHERE {}", clauses.join(" AND ")) };
         FleetSql { where_clause, params }
     }
-
-    /// Query-string suffix (leading `&`) carrying the active filters, for links
-    /// that already set `sort`/`dir` (and `page`).
-    pub fn query_suffix(&self) -> String {
-        let mut s = String::new();
-        let q = self.q.trim();
-        if !q.is_empty() {
-            s.push_str("&q=");
-            s.push_str(&urlencode(q));
-        }
-        if self.cat == "fixed" || self.cat == "heli" {
-            s.push_str("&cat=");
-            s.push_str(&self.cat);
-        }
-        if self.mil {
-            s.push_str("&mil=1");
-        }
-        if self.today {
-            s.push_str("&today=1");
-        }
-        if self.new7 {
-            s.push_str("&new7=1");
-        }
-        if self.interesting {
-            s.push_str("&interesting=1");
-        }
-        if self.privacy {
-            s.push_str("&privacy=1");
-        }
-        if self.emergency {
-            s.push_str("&emergency=1");
-        }
-        if self.regular {
-            s.push_str("&regular=1");
-        }
-        if self.dormant {
-            s.push_str("&dormant=1");
-        }
-        if let Some(v) = self.alt_min {
-            s.push_str(&format!("&alt_min={v}"));
-        }
-        if let Some(v) = self.alt_max {
-            s.push_str(&format!("&alt_max={v}"));
-        }
-        s
-    }
 }
 
 pub fn aircraft_sorted(
@@ -442,7 +398,7 @@ pub fn aircraft_sorted(
 ) -> rusqlite::Result<Vec<AircraftRow>> {
     let (col, default_dir) = sort_column(sort);
     let dir = if is_valid_dir(dir) { dir } else { default_dir };
-    let conn = db.lock().expect("db mutex");
+    let conn = crate::db_lock(db);
     let mut f = filter.to_sql(now);
     f.params.push((":limit", Value::Integer(i64::from(limit))));
     f.params.push((":offset", Value::Integer(i64::from(offset))));
@@ -459,16 +415,18 @@ pub fn aircraft_sorted(
 
 /// Number of aircraft matching the same filter as `aircraft_sorted`.
 pub fn aircraft_count(db: &Db, filter: &FleetFilter, now: f64) -> rusqlite::Result<i64> {
-    let conn = db.lock().expect("db mutex");
+    let conn = crate::db_lock(db);
     let f = filter.to_sql(now);
-    let sql = format!("SELECT COUNT(*) {FROM} {}", f.where_clause);
+    // Only the search clause touches `enrichment`; skip the join when unused.
+    let from = if filter.q.trim().is_empty() { "FROM aircraft a" } else { FROM };
+    let sql = format!("SELECT COUNT(*) {from} {}", f.where_clause);
     let mut stmt = conn.prepare(&sql)?;
     let params = f.bind();
     stmt.query_row(&params[..], |r| r.get(0))
 }
 
 pub fn recent_arrivals(db: &Db) -> rusqlite::Result<Vec<AircraftRow>> {
-    let conn = db.lock().expect("db mutex");
+    let conn = crate::db_lock(db);
     let mut stmt = conn.prepare(&format!(
         "SELECT {COLS} {FROM} ORDER BY a.first_seen DESC LIMIT 10"
     ))?;
@@ -478,7 +436,7 @@ pub fn recent_arrivals(db: &Db) -> rusqlite::Result<Vec<AircraftRow>> {
 
 /// Aircraft still on the tar1090 map, nearest first (unpositioned last).
 pub fn live_aircraft(db: &Db, now: f64) -> rusqlite::Result<Vec<AircraftRow>> {
-    let conn = db.lock().expect("db mutex");
+    let conn = crate::db_lock(db);
     let mut stmt = conn.prepare(&format!(
         "SELECT {COLS} {FROM}
          WHERE a.last_seen > ?1
@@ -489,7 +447,7 @@ pub fn live_aircraft(db: &Db, now: f64) -> rusqlite::Result<Vec<AircraftRow>> {
     rows.collect()
 }
 
-#[derive(Debug, Default, serde::Serialize)]
+#[derive(Debug, Default, Clone, serde::Serialize)]
 pub struct Record {
     pub hex: String,
     pub value: f64,
@@ -497,7 +455,7 @@ pub struct Record {
     pub typecode: Option<String>,
 }
 
-#[derive(Debug, Default, serde::Serialize)]
+#[derive(Debug, Default, Clone, serde::Serialize)]
 pub struct Stats {
     pub total_aircraft: i64,
     pub currently_airborne: i64,
@@ -570,11 +528,37 @@ fn record(conn: &Connection, what: &str) -> rusqlite::Result<Option<Record>> {
     .optional()
 }
 
+/// `Stats` is 16 queries over all-time aggregates; the cards tick asks for it
+/// every 10 s. Serve a 10 s-old copy instead of re-running it.
+const STATS_TTL_SECS: f64 = 10.0;
+
+static STATS_CACHE: std::sync::LazyLock<std::sync::Mutex<Option<(f64, Stats)>>> =
+    std::sync::LazyLock::new(|| std::sync::Mutex::new(None));
+
+pub fn stats_cached(db: &Db, now: f64) -> rusqlite::Result<Stats> {
+    {
+        let guard = STATS_CACHE.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        if let Some((at, s)) = guard.as_ref() {
+            if now - at < STATS_TTL_SECS {
+                return Ok(s.clone());
+            }
+        }
+    }
+    // Deliberately outside the cache lock: the queries take ~20 ms and a
+    // concurrent caller must not be serialized behind them.
+    let s = stats(db, now)?;
+    *STATS_CACHE.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = Some((now, s.clone()));
+    Ok(s)
+}
+
 pub fn stats(db: &Db, now: f64) -> rusqlite::Result<Stats> {
-    let conn = db.lock().expect("db mutex");
+    let conn = crate::db_lock(db);
     let total_aircraft: i64 = conn.query_row("SELECT COUNT(*) FROM aircraft", [], |r| r.get(0))?;
-    let currently_airborne: i64 =
-        conn.query_row("SELECT COUNT(*) FROM aircraft WHERE last_seen > ?1", params![now - 60.0], |r| r.get(0))?;
+    let currently_airborne: i64 = conn.query_row(
+        "SELECT COUNT(*) FROM aircraft WHERE last_seen > ?1",
+        params![now - LIVE_WINDOW_SECS],
+        |r| r.get(0),
+    )?;
     let today_start = local_today_start();
     // Bucket poll_log by local hour/day. The offset is applied in SQL so the
     // stored epoch labels line up with what the cards render in local time.
@@ -598,23 +582,25 @@ pub fn stats(db: &Db, now: f64) -> rusqlite::Result<Stats> {
 
     let busiest_hour: Option<Record> = conn
         .query_row(
-            "SELECT CAST(CAST((ts + ?1) / 3600 AS INTEGER) * 3600 - ?1 AS INTEGER), MAX(aircraft_count)
-             FROM poll_log GROUP BY 1 ORDER BY 2 DESC LIMIT 1",
+            "SELECT CAST(CAST((ts + ?1) / 3600 AS INTEGER) * 3600 - ?1 AS INTEGER), MAX(max_count)
+             FROM poll_hour GROUP BY 1 ORDER BY 2 DESC LIMIT 1",
             params![tz_offset],
             |r| Ok(Record { hex: r.get::<_, i64>(0)?.to_string(), value: r.get(1)?, ..Default::default() }),
         )
         .optional()?;
 
+    // CROSS JOIN pins aircraft as the outer loop; with a plain JOIN SQLite scans
+    // all ~520k enrichment rows (SCAN e) to answer a 343-row question.
     let types_seen: i64 = conn.query_row(
         "SELECT COUNT(DISTINCT e.typecode) FROM aircraft a
-         JOIN enrichment e ON e.icao24 = a.hex WHERE e.typecode IS NOT NULL",
+         CROSS JOIN enrichment e ON e.icao24 = a.hex WHERE e.typecode IS NOT NULL",
         [],
         |r| r.get(0),
     )?;
     let top_type: Option<Record> = conn
         .query_row(
             "SELECT e.typecode, COUNT(*) FROM aircraft a
-             JOIN enrichment e ON e.icao24 = a.hex
+             CROSS JOIN enrichment e ON e.icao24 = a.hex
              WHERE e.typecode IS NOT NULL
              GROUP BY e.typecode ORDER BY 2 DESC LIMIT 1",
             [],
@@ -625,7 +611,7 @@ pub fn stats(db: &Db, now: f64) -> rusqlite::Result<Stats> {
     let top_operator: Option<Record> = conn
         .query_row(
             "SELECT e.operator, COUNT(DISTINCT a.hex) FROM aircraft a
-             JOIN enrichment e ON e.icao24 = a.hex
+             CROSS JOIN enrichment e ON e.icao24 = a.hex
              WHERE e.operator IS NOT NULL
              GROUP BY e.operator ORDER BY 2 DESC LIMIT 1",
             [],
@@ -654,8 +640,8 @@ pub fn stats(db: &Db, now: f64) -> rusqlite::Result<Stats> {
 
     let busiest_day: Option<Record> = conn
         .query_row(
-            "SELECT CAST(CAST((ts + ?1) / 86400 AS INTEGER) * 86400 - ?1 AS INTEGER), MAX(aircraft_count)
-             FROM poll_log GROUP BY 1 ORDER BY 2 DESC LIMIT 1",
+            "SELECT CAST(CAST((ts + ?1) / 86400 AS INTEGER) * 86400 - ?1 AS INTEGER), MAX(max_count)
+             FROM poll_hour GROUP BY 1 ORDER BY 2 DESC LIMIT 1",
             params![tz_offset],
             |r| Ok(Record { hex: r.get::<_, i64>(0)?.to_string(), value: r.get(1)?, ..Default::default() }),
         )
@@ -682,7 +668,7 @@ pub fn stats(db: &Db, now: f64) -> rusqlite::Result<Stats> {
 }
 
 pub fn aircraft_by_hex(db: &Db, hex: &str) -> rusqlite::Result<Option<AircraftRow>> {
-    let conn = db.lock().expect("db mutex");
+    let conn = crate::db_lock(db);
     conn.query_row(
         &format!("SELECT {COLS} {FROM} WHERE a.hex = ?1"),
         params![hex],
@@ -708,7 +694,7 @@ impl EmergencyRow {
 }
 
 pub fn emergency_log(db: &Db, limit: u32) -> rusqlite::Result<Vec<EmergencyRow>> {
-    let conn = db.lock().expect("db mutex");
+    let conn = crate::db_lock(db);
     let mut stmt = conn.prepare(
         "SELECT ts, hex, squawk, emergency FROM emergency_log ORDER BY ts DESC LIMIT ?1",
     )?;
@@ -746,7 +732,7 @@ impl CallsignRow {
 }
 
 pub fn callsigns_for(db: &Db, hex: &str) -> rusqlite::Result<Vec<CallsignRow>> {
-    let conn = db.lock().expect("db mutex");
+    let conn = crate::db_lock(db);
     let mut stmt = conn.prepare(
         "SELECT callsign, first_seen, last_seen, sightings
          FROM aircraft_callsigns WHERE hex = ?1 ORDER BY last_seen DESC",
@@ -770,9 +756,9 @@ pub struct VisitRow {
 }
 
 pub fn visits_for(db: &Db, hex: &str) -> rusqlite::Result<Vec<VisitRow>> {
-    let conn = db.lock().expect("db mutex");
+    let conn = crate::db_lock(db);
     let mut stmt = conn.prepare(
-        "SELECT start_ts, end_ts, polls FROM visits WHERE hex = ?1 ORDER BY start_ts DESC",
+        "SELECT start_ts, end_ts, polls FROM visits WHERE hex = ?1 ORDER BY start_ts DESC LIMIT 200",
     )?;
     let rows = stmt.query_map(params![hex], |r| {
         Ok(VisitRow { start_ts: r.get(0)?, end_ts: r.get(1)?, polls: r.get(2)? })
@@ -802,7 +788,7 @@ pub struct Enrichment {
 }
 
 pub fn enrichment_for(db: &Db, hex: &str) -> rusqlite::Result<Option<Enrichment>> {
-    let conn = db.lock().expect("db mutex");
+    let conn = crate::db_lock(db);
     conn.query_row(
         "SELECT registration, manufacturer, model, typecode, owner, operator,
                 serialnumber, icaoaircrafttype, operatorcallsign,
