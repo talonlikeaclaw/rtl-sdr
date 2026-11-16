@@ -1046,7 +1046,9 @@ td.links a:hover { text-decoration: underline; }
 
 @media (max-width: 640px) {
   .heatmap { grid-template-columns: 1.9rem repeat(24, minmax(0, 1fr)); }
-  .heatmap-hour, .heatmap-day { font-size: 0.62rem; }
+  /* 0.7rem, not smaller: these labels name the hour and the weekday, so they
+     are functional text and hold the same 11px floor as every other label. */
+  .heatmap-hour, .heatmap-day { font-size: 0.7rem; }
 }
 
 /* iOS Safari zooms the viewport when a focused input is under 16px, and leaves

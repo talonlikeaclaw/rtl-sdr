@@ -30,7 +30,7 @@ typography:
     letterSpacing: "-0.02em"
   title:
     fontFamily: "system-ui, -apple-system, Segoe UI, Roboto, sans-serif"
-    fontSize: "0.72rem"
+    fontSize: "0.75rem"
     fontWeight: 600
     letterSpacing: "0.16em"
   body:
@@ -120,7 +120,7 @@ thing only. Everything else is frosted white at low alpha.
 
 Restraint here is not absence of design; it is the precision of a panel where each
 mark has a job. Numbers are tabular so they do not jitter as they update. Uppercase is
-reserved for labels at 0.66–0.72rem with 0.11–0.16em tracking, so the eye can skip
+reserved for labels at 0.7–0.75rem with 0.11–0.16em tracking, so the eye can skip
 them. Panels are the composition: the page is a vertical stack of gauge faces, and the
 only thing that moves is the data inside them.
 
@@ -194,10 +194,10 @@ tracking and case, not from a second family.
   (`plane-stats`, `Today`, `Activity`).
 - **Headline** (600, clamp(1.4rem, 2.4vw, 1.7rem), line-height 1.15, -0.02em,
   tabular-nums): card numerals — the biggest thing on the page after the title.
-- **Title** (600, 0.72rem, 0.16em, uppercase, Faint Slate): panel eyebrows, each with a
+- **Title** (600, 0.75rem, 0.16em, uppercase, Faint Slate): panel eyebrows, each with a
   2px Sky Blue Dim bar before it.
-- **Body** (400, 0.84rem): table content; 0.8rem for taglines and 0.78rem for pager and
-  link cells.
+- **Body** (400, 0.84rem): table content; 0.8rem for taglines and empty notes, 0.78rem
+  for pager and link cells, 0.75rem for chart captions.
 - **Label** (600, 0.72rem, 0.11em, uppercase, Faint Slate): table headers, card
   sublabels, filter-group labels.
 - **Mono** (400, 0.78rem): ICAO hex in the first table column, the footer line.
@@ -210,7 +210,7 @@ shifts the layout when it ticks is a bug.
 **The One Voice Rule.** No second sans family. If a form control does not inherit the
 stack, fix the control; do not add a font.
 
-**The Tracked Caps Rule.** Uppercase only at 0.66–0.72rem with at least 0.1em tracking.
+**The Tracked Caps Rule.** Uppercase only at 0.7–0.75rem with at least 0.1em tracking.
 Body copy and data are never uppercase.
 
 ## Layout
@@ -274,9 +274,13 @@ change transform, size or shadow.
 
 ## Shapes
 
-A radius ladder, not a single radius: 16px panels, 13px cards, 10px inputs, tables,
-charts and tooltips, 8px altitude fields, 999px pills and chips. The ladder is what
-makes a card read as sitting inside a panel.
+A radius ladder, not a single radius: 16px panels, 13px cards, 10px inputs, tables and
+charts, 8px altitude fields, 999px pills and chips. The ladder is what makes a card read
+as sitting inside a panel.
+
+Component-local geometry sits outside the ladder and is not a step: 3px heat cells, 2px
+top corners on histogram bars, 1px waveform caps, 7px on the chart tooltip, 12px on the
+logo tile.
 
 Recurring geometry:
 - **2px accent ticks** — the bar before a panel eyebrow, the left-edge marker on each
@@ -353,6 +357,13 @@ When any filter is on, `partials/table.html` opens with a `.filter-summary` line
 `Showing Military · Heard today` — and a `Clear all` link to `/`. Each chip also carries
 its matching row count in `.chip-n`, so a flag that matches nothing says `0` instead of
 returning an empty table with no explanation.
+
+### Error page
+`templates/error.html` renders an unknown hex in the same shell as every other page, at a
+real 404 status. Display title `Not in the ledger`, a Muted Slate tagline naming the hex
+with the `.meta` suffix, and one panel whose eyebrow is `What happened` over a single
+`.empty-note` sentence: what the receiver did not log, then the way back. No illustration,
+no apology, no second accent.
 
 ### Charts and heatmap (signature)
 The `/today` histogram is a 24-column CSS grid, 120px tall, with three hairline
