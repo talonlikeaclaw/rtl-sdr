@@ -1,0 +1,186 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-11-15",
+  "title": "Design System: plane-stats",
+  "extensions": {
+    "colorMeta": {
+      "sky-blue": {
+        "role": "primary",
+        "displayName": "Sky Blue",
+        "canonical": "#9ec5e8",
+        "tonalRamp": [
+          "rgba(158, 197, 232, 0.16)",
+          "rgba(158, 197, 232, 0.3)",
+          "rgba(158, 197, 232, 0.46)",
+          "rgba(158, 197, 232, 0.55)",
+          "rgba(158, 197, 232, 0.66)",
+          "#9ec5e8"
+        ]
+      },
+      "signal-mint": {
+        "role": "secondary",
+        "displayName": "Signal Mint",
+        "canonical": "#6ee7b7",
+        "tonalRamp": ["#6ee7b7"]
+      },
+      "emergency-amber": {
+        "role": "tertiary",
+        "displayName": "Emergency Amber",
+        "canonical": "#fbbf24",
+        "tonalRamp": ["#fbbf24"]
+      },
+      "night-ground": {
+        "role": "neutral",
+        "displayName": "Night Ground",
+        "canonical": "#070a0f",
+        "tonalRamp": ["#06080c", "#070a0f", "#080b11", "rgba(6, 10, 16, 0.32)"]
+      },
+      "instrument-text": {
+        "role": "neutral",
+        "displayName": "Instrument Text",
+        "canonical": "#e8edf4",
+        "tonalRamp": ["#f1f5f9", "#e8edf4", "rgba(232, 237, 244, 0.85)", "rgba(203, 213, 225, 0.6)", "rgba(148, 163, 184, 0.5)"]
+      },
+      "hairline-stroke": {
+        "role": "neutral",
+        "displayName": "Hairline Stroke",
+        "canonical": "rgba(255, 255, 255, 0.09)",
+        "tonalRamp": ["rgba(255, 255, 255, 0.035)", "rgba(255, 255, 255, 0.045)", "rgba(255, 255, 255, 0.05)", "rgba(255, 255, 255, 0.09)", "rgba(255, 255, 255, 0.14)", "rgba(255, 255, 255, 0.18)"]
+      },
+      "glass": {
+        "role": "neutral",
+        "displayName": "Frosted Glass",
+        "canonical": "rgba(255, 255, 255, 0.055)",
+        "tonalRamp": ["rgba(255, 255, 255, 0.018)", "rgba(255, 255, 255, 0.025)", "rgba(255, 255, 255, 0.055)", "rgba(255, 255, 255, 0.06)", "rgba(255, 255, 255, 0.1)"]
+      }
+    },
+    "typographyMeta": {
+      "display": { "displayName": "Display", "purpose": "Page titles only: plane-stats, Today, Activity." },
+      "headline": { "displayName": "Headline", "purpose": "Card numerals — the largest data on the page." },
+      "title": { "displayName": "Panel eyebrow", "purpose": "Tracked uppercase panel headings, always with a 2px accent bar." },
+      "body": { "displayName": "Body", "purpose": "Table content and prose." },
+      "label": { "displayName": "Label", "purpose": "Table headers, card sublabels, filter-group labels." },
+      "mono": { "displayName": "Mono", "purpose": "ICAO hex codes and the footer credential line." }
+    },
+    "shadows": [
+      { "name": "panel-lift", "value": "0 18px 44px -26px rgba(0, 0, 0, 0.85)", "purpose": "Every .glass panel and card." },
+      { "name": "inset-highlight", "value": "inset 0 1px 0 rgba(255, 255, 255, 0.1)", "purpose": "Top edge of panels, cards, pills and chips." },
+      { "name": "bezel-ring", "value": "outline: 1px solid rgba(255, 255, 255, 0.035); outline-offset: 5px", "purpose": ".glass only — the instrument bezel." },
+      { "name": "tip-shadow", "value": "0 8px 24px -12px rgba(0, 0, 0, 0.9)", "purpose": "Histogram tooltip." },
+      { "name": "chip-active-glow", "value": "0 0 0 1px rgba(158, 197, 232, 0.25), 0 4px 14px -8px rgba(158, 197, 232, 0.7)", "purpose": "Selected filter chip — the only glowing element." }
+    ],
+    "motion": [
+      { "name": "orb-drift", "value": "34s ease-in-out infinite alternate", "purpose": "The three background orbs translate 2vw/3vh and scale to 1.05." },
+      { "name": "wave-pulse", "value": "1.3s ease-in-out infinite", "purpose": "Live waveform bars scaleY(0.3 -> 1) with staggered negative delays." },
+      { "name": "state-transition", "value": "0.15s ease", "purpose": "Row hover background, chip colour/border/background." },
+      { "name": "sort-transition", "value": "0.2s ease", "purpose": "Sortable table header colour and background." },
+      { "name": "reduced-motion", "value": "0.001ms !important", "purpose": "prefers-reduced-motion collapses every animation and transition." }
+    ],
+    "breakpoints": [
+      { "name": "mobile", "value": "640px", "purpose": "Panel padding 1rem 0.9rem 1.1rem, card min 9rem, blur 14px, .meta hidden." }
+    ]
+  },
+  "components": [
+    {
+      "name": "Glass Panel",
+      "kind": "card",
+      "refersTo": "panel",
+      "description": "The composition unit: a frosted gauge face with a bezel ring, an eyebrow, and one content block.",
+      "html": "<section class=\"glass panel\" aria-label=\"Overhead now\">\n  <h2>Overhead now</h2>\n  <div class=\"table-wrap\">…</div>\n</section>",
+      "css": ".glass { position: relative; border-radius: 16px; border: 1px solid rgba(255,255,255,0.09); background: linear-gradient(160deg, rgba(255,255,255,0.055), rgba(255,255,255,0.018)); box-shadow: 0 18px 44px -26px rgba(0,0,0,0.85), inset 0 1px 0 rgba(255,255,255,0.1); backdrop-filter: blur(20px) saturate(135%); outline: 1px solid rgba(255,255,255,0.035); outline-offset: 5px; } .glass::after { content: \"\"; position: absolute; inset: 0 18% auto; height: 1px; border-radius: 999px; background: linear-gradient(90deg, transparent, rgba(255,255,255,0.32), transparent); opacity: 0.6; pointer-events: none; } .panel { padding: 1.2rem 1.35rem 1.35rem; margin-bottom: 1.25rem; } .panel > h2 { display: flex; align-items: center; gap: 0.55rem; margin: 0 0 0.9rem; font-size: 0.72rem; font-weight: 600; letter-spacing: 0.16em; text-transform: uppercase; color: rgba(148,163,184,0.5); } .panel > h2::before { content: \"\"; width: 2px; height: 0.85rem; border-radius: 999px; background: rgba(158,197,232,0.55); }"
+    },
+    {
+      "name": "Stat Card",
+      "kind": "card",
+      "refersTo": "card",
+      "description": "One all-time record or count: tabular numeral, uppercase sublabel, optional linked who-line.",
+      "html": "<div class=\"card\">\n  <div class=\"num\">43.8 <span class=\"unit\">nm</span></div>\n  <div class=\"sub\">range record</div>\n  <div class=\"who\"><a href=\"/aircraft/abc123\">C-FGKN · A321</a></div>\n</div>",
+      "css": ".card { position: relative; padding: 1rem 1.1rem 1.05rem; border-radius: 13px; border: 1px solid rgba(255,255,255,0.075); background: linear-gradient(160deg, rgba(255,255,255,0.06), rgba(255,255,255,0.015)); box-shadow: inset 0 1px 0 rgba(255,255,255,0.11); backdrop-filter: blur(16px) saturate(130%); } .card::before { content: \"\"; position: absolute; top: 0.9rem; left: 0; width: 2px; height: 0.7rem; border-radius: 0 2px 2px 0; background: rgba(158,197,232,0.55); opacity: 0.8; } .card .num { font-size: clamp(1.4rem, 2.4vw, 1.7rem); font-weight: 600; letter-spacing: -0.02em; font-variant-numeric: tabular-nums; line-height: 1.15; color: #f1f5f9; } .card .sub { margin-top: 0.3rem; font-size: 0.66rem; font-weight: 500; letter-spacing: 0.1em; text-transform: uppercase; color: rgba(148,163,184,0.5); } .card .who { margin-top: 0.4rem; font-size: 0.72rem; color: rgba(203,213,225,0.6); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; } .card .who a { color: #9ec5e8; text-decoration: none; }"
+    },
+    {
+      "name": "Header Pill",
+      "kind": "nav",
+      "refersTo": "pill",
+      "description": "Navigation capsule; the live pill carries the Signal Mint waveform.",
+      "html": "<a class=\"pill\" href=\"/today\">Today</a>\n<span class=\"pill\"><span class=\"wave\" aria-hidden=\"true\"><span></span><span></span><span></span><span></span></span>live · refreshes every 10&nbsp;s</span>",
+      "css": ".pill { display: inline-flex; align-items: center; gap: 0.5rem; padding: 0.4rem 0.8rem; font-size: 0.72rem; font-weight: 500; letter-spacing: 0.04em; color: rgba(203,213,225,0.6); text-decoration: none; border-radius: 999px; border: 1px solid rgba(255,255,255,0.09); background: linear-gradient(160deg, rgba(255,255,255,0.055), rgba(255,255,255,0.018)); box-shadow: inset 0 1px 0 rgba(255,255,255,0.1); backdrop-filter: blur(14px) saturate(130%); } .wave { display: inline-flex; align-items: flex-end; gap: 2px; height: 0.85rem; } .wave span { width: 2.5px; height: 100%; border-radius: 1px; background: #6ee7b7; transform-origin: bottom; animation: wave 1.3s ease-in-out infinite; }"
+    },
+    {
+      "name": "Filter Chip",
+      "kind": "chip",
+      "refersTo": "chip",
+      "description": "Toggle filter built from a visually hidden checkbox plus a label. Selected state is the only filled accent surface.",
+      "html": "<input type=\"checkbox\" id=\"f-mil\" name=\"mil\" value=\"1\" class=\"chip-toggle\">\n<label class=\"chip\" for=\"f-mil\">Military</label>",
+      "css": ".chip-toggle { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; } .chip { display: inline-flex; align-items: center; padding: 0.32rem 0.72rem; font-size: 0.72rem; font-weight: 500; letter-spacing: 0.03em; color: rgba(203,213,225,0.6); border: 1px solid rgba(255,255,255,0.09); border-radius: 999px; background: linear-gradient(160deg, rgba(255,255,255,0.055), rgba(255,255,255,0.018)); box-shadow: inset 0 1px 0 rgba(255,255,255,0.08); cursor: pointer; user-select: none; transition: color 0.15s ease, border-color 0.15s ease, background 0.15s ease; } .chip:hover { color: #e8edf4; border-color: rgba(255,255,255,0.18); } .chip-toggle:checked + .chip { color: #07121f; border-color: #9ec5e8; background: #9ec5e8; box-shadow: 0 0 0 1px rgba(158,197,232,0.25), 0 4px 14px -8px rgba(158,197,232,0.7); } .chip-toggle:focus-visible + .chip { outline: 2px solid rgba(158,197,232,0.55); outline-offset: 2px; }"
+    },
+    {
+      "name": "Search Field",
+      "kind": "input",
+      "refersTo": "input-search",
+      "description": "Full-width fleet search. Known defect: does not inherit font-family and computes to Arial.",
+      "html": "<input id=\"fleet-search\" class=\"search\" type=\"search\" name=\"q\" placeholder=\"Search hex, callsign, registration, type, owner, operator…\" aria-label=\"Search fleet\">",
+      "css": "input.search { width: 100%; margin: 0.6rem 0 0.9rem; padding: 0.55rem 0.9rem; font-family: inherit; font-size: 0.85rem; color: inherit; background: linear-gradient(160deg, rgba(255,255,255,0.055), rgba(255,255,255,0.018)); border: 1px solid rgba(255,255,255,0.09); border-radius: 10px; outline: none; backdrop-filter: blur(14px) saturate(130%); } input.search::placeholder { color: rgba(203,213,225,0.6); } input.search:focus { border-color: rgba(158,197,232,0.55); }"
+    },
+    {
+      "name": "Fleet Table",
+      "kind": "custom",
+      "refersTo": "table-cell",
+      "description": "Recessed data table: tracked uppercase headers, tabular rows, mono hex identity column.",
+      "html": "<div class=\"table-wrap\">\n  <table>\n    <thead><tr><th class=\"active desc\">Hex</th><th>Callsign</th></tr></thead>\n    <tbody><tr><td>c0838c</td><td>POE2487</td></tr></tbody>\n  </table>\n</div>",
+      "css": ".table-wrap { overflow-x: auto; border-radius: 10px; border: 1px solid rgba(255,255,255,0.05); background: rgba(6,10,16,0.32); box-shadow: inset 0 1px 0 rgba(255,255,255,0.04); } table { width: 100%; border-collapse: collapse; font-size: 0.84rem; font-variant-numeric: tabular-nums; } th, td { padding: 0.5rem 0.8rem; text-align: left; white-space: nowrap; border-bottom: 1px solid rgba(255,255,255,0.045); } th { font-size: 0.66rem; font-weight: 600; letter-spacing: 0.11em; text-transform: uppercase; color: rgba(148,163,184,0.5); background: rgba(255,255,255,0.025); user-select: none; } th.active { color: #9ec5e8; } th.active.desc::after { content: \" ▾\"; font-size: 0.75em; } tbody tr:hover { background: rgba(255,255,255,0.035); } td { color: rgba(232,237,244,0.85); } td:first-child { font-family: ui-monospace, \"SF Mono\", Menlo, Consolas, monospace; font-size: 0.78rem; color: rgba(158,197,232,0.55); }"
+    },
+    {
+      "name": "Hour Histogram",
+      "kind": "custom",
+      "refersTo": null,
+      "description": "24-column CSS-grid bar chart with three hairline gridlines, Sky Blue bars, Signal Mint on hover.",
+      "html": "<div class=\"hist\">\n  <div class=\"hist-col\" tabindex=\"0\"><div class=\"hist-track\"><div class=\"hist-bar\" style=\"height: 62%\"></div></div></div>\n</div>",
+      "css": ".hist { position: relative; display: grid; grid-template-columns: repeat(24, minmax(0, 1fr)); gap: 2px; height: 120px; padding: 0.5rem 0.4rem; border-radius: 10px; border: 1px solid rgba(255,255,255,0.05); background-color: rgba(6,10,16,0.32); background-image: linear-gradient(rgba(255,255,255,0.07), rgba(255,255,255,0.07)), linear-gradient(rgba(255,255,255,0.07), rgba(255,255,255,0.07)), linear-gradient(rgba(255,255,255,0.07), rgba(255,255,255,0.07)); background-size: 100% 1px; background-position: 0 0, 0 50%, 0 100%; background-repeat: no-repeat; background-origin: content-box; } .hist-col { display: flex; flex-direction: column; min-width: 0; height: 100%; outline: none; } .hist-track { display: flex; align-items: flex-end; flex: 1; min-height: 0; } .hist-bar { width: 100%; border-radius: 2px 2px 0 0; background: linear-gradient(180deg, #9ec5e8, rgba(158,197,232,0.55)); } .hist-col:hover .hist-bar, .hist-col:focus .hist-bar { background: #6ee7b7; }"
+    },
+    {
+      "name": "Activity Heat Cell",
+      "kind": "custom",
+      "refersTo": null,
+      "description": "One weekday x hour cell; five Sky Blue alpha steps, Signal Mint outline on the peak.",
+      "html": "<div class=\"heat-cell lvl-3\"></div>\n<div class=\"heat-cell lvl-5 peak\"></div>",
+      "css": ".heat-cell { min-width: 0; height: clamp(11px, 2vw, 22px); border-radius: 3px; background: rgba(255,255,255,0.035); } .heat-cell.lvl-1 { background: rgba(158,197,232,0.16); } .heat-cell.lvl-2 { background: rgba(158,197,232,0.3); } .heat-cell.lvl-3 { background: rgba(158,197,232,0.46); } .heat-cell.lvl-4 { background: rgba(158,197,232,0.66); } .heat-cell.lvl-5 { background: #9ec5e8; } .heat-cell.peak { outline: 1px solid #6ee7b7; outline-offset: -1px; }"
+    }
+  ],
+  "narrative": {
+    "northStar": "The Flight Deck",
+    "overview": "plane-stats is a dark instrument panel that happens to be a web page. The ground is near-black with a faint 72px grid that fades at the edges; three low-opacity orbs drift behind it; every panel floats above that ground as a frosted gauge face — a 160° white gradient at 5.5% falling to 1.8%, blurred, with a hairline of light along its top edge and a faint ring set 5px outside it, like the bezel of a cockpit dial. The header is closed by a 1px dashed line: a runway centerline. The voice is night-watch quiet: the screen is looked at in a dark room, at a glance, by one person checking what is overhead and what was new today. The interface never raises its own voice — no illustration, no empty decoration, no second accent. Colour is carried almost entirely by data: Sky Blue for anything actionable or part of a series, Signal Mint for what is live or improving, Emergency Amber for one thing only.",
+    "keyCharacteristics": [
+      "Frosted glass panels over a near-black instrument ground; depth is material, not state.",
+      "One cool data hue (Sky Blue), one liveness hue (Signal Mint), one alarm hue (Emergency Amber).",
+      "System sans at three registers; mono only for machine strings (hex codes, footer).",
+      "Tabular numerals everywhere a value can change.",
+      "State changes are colour, border and background — never scale, bounce or translate."
+    ],
+    "rules": [
+      { "name": "The Rarity Rule", "body": "Sky Blue never fills a surface except the one selected chip. It marks data and interaction; it is not a background.", "section": "colors" },
+      { "name": "The Amber Rule", "body": "Amber means an emergency squawk. No other state, badge or warning may borrow it.", "section": "colors" },
+      { "name": "The Mint Rule", "body": "Mint marks liveness or a broken record. It is not a generic success colour and never appears on a static value.", "section": "colors" },
+      { "name": "The Tabular Rule", "body": "Every number that can change sets font-variant-numeric: tabular-nums. A value that shifts the layout when it ticks is a bug.", "section": "typography" },
+      { "name": "The One Voice Rule", "body": "No second sans family. If a form control does not inherit the stack, fix the control; do not add a font.", "section": "typography" },
+      { "name": "The Tracked Caps Rule", "body": "Uppercase only at 0.66–0.72rem with at least 0.1em tracking. Body copy and data are never uppercase.", "section": "typography" },
+      { "name": "The Bezel Rule", "body": "The 5px-offset outline belongs to .glass panels. Cards, pills, chips and inputs get the inset highlight and nothing else.", "section": "elevation" },
+      { "name": "The No-Lift Rule", "body": "Hover and focus change colour, border or background. They never change transform, size or shadow.", "section": "elevation" }
+    ],
+    "dos": [
+      "Do build every surface from the 160° glass gradient and the 1px hairline stroke; a flat fill is only for the table well and the selected chip.",
+      "Do set font-variant-numeric: tabular-nums on every changing value.",
+      "Do open each panel with a tracked uppercase eyebrow and its 2px accent bar.",
+      "Do use Sky Blue Dim for focus borders and the hex column, full Sky Blue for links and active state.",
+      "Do keep the 640px breakpoint the only layout break and let tables scroll inside .table-wrap.",
+      "Do respect prefers-reduced-motion."
+    ],
+    "donts": [
+      "Don't let a form control fall back to the UA font; input.search currently computes to Arial.",
+      "Don't use Emergency Amber for anything but emergency squawks.",
+      "Don't add scale, translate or bounce transitions.",
+      "Don't fill a panel, card or row with Sky Blue.",
+      "Don't place a tooltip inside a .glass panel; backdrop-filter makes it the containing block for position: fixed.",
+      "Don't add a second sans family, a display serif, or an icon set."
+    ]
+  }
+}
