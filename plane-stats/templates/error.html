@@ -32,7 +32,9 @@
       <nav class="hero-actions" aria-label="Primary">
         <a class="pill" href="/">← Dashboard</a>
         <a class="pill" href="/today">Today</a>
+        {% if !tar1090.is_empty() %}
         <a class="pill" href="{{ tar1090 }}/" target="_blank" rel="noopener">Open live map</a>
+        {% endif %}
       </nav>
     </header>
 

@@ -404,6 +404,12 @@ h1 {
   background-attachment: local, scroll;
 }
 
+/* Enrichment values are third-party text — an owner, a model or a notes field
+   can run long with no hyphenation point. Let a cell break rather than force
+   the whole table into horizontal scroll. `break-word`, not `anywhere`: the
+   latter also shrinks min-content sizing and would collapse the fleet columns. */
+td { overflow-wrap: break-word; }
+
 /* The fleet table is 4x wider than a phone; pin the identity columns so the
    row keeps its identity while the rest scrolls. Fixed width on the hex column
    gives the callsign column a deterministic `left` to stick at. */
@@ -1043,6 +1049,52 @@ td.links a:hover { text-decoration: underline; }
 .chart-note { font-size: 0.75rem; color: var(--muted); }
 
 .empty-note { margin: 0.3rem 0 0; font-size: 0.8rem; color: var(--muted); }
+
+/* An empty table body is a state, not a blank. It gets room, the muted voice,
+   and the one action that gets the reader out of it. */
+.empty-row {
+  /* 0.8rem horizontal, matching the cell padding: the message must start on
+     the same x as the column header above it, not 8px to its left. */
+  padding: 1.15rem 0.8rem;
+  font-size: 0.8rem;
+  line-height: 1.5;
+  color: var(--muted);
+}
+.empty-row a { color: var(--accent); }
+/* The receiver's own warning hue, already carried by the header pill. An empty
+   live panel while polls are not landing is not "clear skies". */
+.empty-row .warn { color: var(--warning); }
+
+/* Connection notice. Direct child of <body>: `.glass` uses backdrop-filter,
+   which makes it the containing block for fixed descendants, so a notice
+   inside a panel would be positioned against the panel and stacked under the
+   next one. */
+.net-note {
+  position: fixed;
+  left: 50%;
+  bottom: 1.1rem;
+  z-index: 40;
+  max-width: min(92vw, 30rem);
+  padding: 0.55rem 0.95rem;
+  font-size: 0.78rem;
+  line-height: 1.4;
+  color: var(--text);
+  text-align: center;
+  border-radius: 10px;
+  border: 1px solid rgba(251, 191, 36, 0.35);
+  /* The same floating-surface fill as .chart-tip, so the two overlays are one
+     material rather than two near-identical blacks. */
+  background: rgba(10, 14, 21, 0.96);
+  box-shadow: 0 18px 44px -26px rgba(0, 0, 0, 0.85);
+  transform: translate(-50%, 0.4rem);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.18s ease-out, transform 0.18s ease-out;
+}
+.net-note.show { opacity: 1; transform: translate(-50%, 0); }
+@media (prefers-reduced-motion: reduce) {
+  .net-note { transition: none; }
+}
 
 @media (max-width: 640px) {
   .heatmap { grid-template-columns: 1.9rem repeat(24, minmax(0, 1fr)); }

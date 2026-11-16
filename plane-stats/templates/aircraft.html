@@ -46,6 +46,7 @@
         <h2>Identity</h2>
         <div class="table-wrap">
           <table>
+            <caption class="sr-only">Registration, model and operator for {{ row.hex }}</caption>
             <tbody>
               <tr><th>Registration</th><td class="mono">{{ row.registration.as_deref().unwrap_or("-") }}</td></tr>
               {% if let Some(m) = enrich %}
@@ -76,6 +77,7 @@
         <h2>Records</h2>
         <div class="table-wrap">
           <table>
+            <caption class="sr-only">All-time records for {{ row.hex }}</caption>
             <tbody>
               <tr><th>First seen</th><td>{{ row.first_seen_str() }}</td></tr>
               <tr><th>Last seen</th><td>{{ row.last_seen_str() }}</td></tr>
@@ -95,6 +97,7 @@
         <h2>Last observed</h2>
         <div class="table-wrap">
           <table>
+            <caption class="sr-only">Position and state at the last poll</caption>
             <tbody>
               <tr><th>Position</th><td class="mono">{{ row.lat_lon_str() }}</td></tr>
               <tr><th>Track</th><td>{{ row.track_str() }}</td></tr>
@@ -110,6 +113,7 @@
         <h2>Callsigns</h2>
         <div class="table-wrap">
           <table>
+            <caption class="sr-only">Every callsign heard from {{ row.hex }}, most recent first</caption>
             <thead>
               <tr><th>Callsign</th><th>First seen</th><th>Last seen</th><th>Polls seen</th></tr>
             </thead>
@@ -123,7 +127,7 @@
               </tr>
               {% endfor %}
               {% if callsigns.is_empty() %}
-              <tr><td colspan="4">No callsigns recorded yet.</td></tr>
+              <tr><td colspan="4" class="empty-row">No callsigns recorded yet. The poller keeps the last one it heard per visit.</td></tr>
               {% endif %}
             </tbody>
           </table>
@@ -134,6 +138,7 @@
         <h2>Visits</h2>
         <div class="table-wrap">
           <table>
+            <caption class="sr-only">Each pass overhead, most recent first</caption>
             <thead>
               <tr><th>Start</th><th>End</th><th>Duration</th><th>Polls seen</th></tr>
             </thead>
@@ -147,7 +152,7 @@
               </tr>
               {% endfor %}
               {% if visits.is_empty() %}
-              <tr><td colspan="4">No visits recorded yet.</td></tr>
+              <tr><td colspan="4" class="empty-row">No visits recorded yet. A visit opens on the first poll that hears this aircraft.</td></tr>
               {% endif %}
             </tbody>
           </table>

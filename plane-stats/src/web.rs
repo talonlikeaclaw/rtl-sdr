@@ -34,6 +34,9 @@ pub fn router(db: Db) -> Router {
         .route("/htmx.min.js", get(htmx_js))
         .route("/app.css", get(app_css))
         .route("/app.js", get(app_js))
+        // Every miss is the same page. axum's default is a bare "404 Not Found"
+        // in plain text, which is the one surface this app does not have.
+        .fallback(not_found)
         .with_state(db)
         // The fleet table and `/api/aircraft` are a few hundred KB of markup.
         .layer(tower_http::compression::CompressionLayer::new())
@@ -74,6 +77,13 @@ fn strip_port(host: &str) -> &str {
         Some((h, port)) if !h.is_empty() && port.chars().all(|c| c.is_ascii_digit()) => h,
         _ => host,
     }
+}
+
+/// An ICAO24 address is six hex digits. Accept up to eight so a future
+/// non-ICAO emitter does not 404, and reject anything else before it reaches
+/// the database or an error page.
+fn valid_hex(hex: &str) -> bool {
+    (1..=8).contains(&hex.len()) && hex.bytes().all(|b| b.is_ascii_hexdigit())
 }
 
 fn ts(epoch: f64) -> String {
@@ -456,21 +466,26 @@ struct LiveTemplate {
     live: Vec<AircraftRow>,
     tar1090: String,
     rx: Option<(f64, f64)>,
+    poller: stats::PollerHealth,
 }
 
 async fn live_partial(State(db): State<Db>, headers: HeaderMap) -> Result<Html<String>, AppError> {
     let now = now();
+    // The panel needs the receiver's health: an empty list means "clear skies"
+    // only while polls are landing. With the poller down it means nothing.
+    let poller = stats::PollerHealth::new(stats::last_poll_age(&db, now)?);
     Ok(Html(
         LiveTemplate {
             live: stats::live_aircraft(&db, now)?,
             tar1090: tar1090_base(&headers),
             rx: stats::rx_pos(),
+            poller,
         }
         .render()?,
     ))
 }
 
-async fn api_live(State(db): State<Db>) -> Result<Json, AppError> {
+async fn api_live(State(db): State<Db>) -> Result<Json, ApiError> {
     Ok(Json(serde_json::to_value(stats::live_aircraft(&db, now())?)?))
 }
 
@@ -502,7 +517,7 @@ async fn today_page(State(db): State<Db>, headers: HeaderMap) -> Result<Html<Str
     ))
 }
 
-async fn api_today(State(db): State<Db>) -> Result<Json, AppError> {
+async fn api_today(State(db): State<Db>) -> Result<Json, ApiError> {
     let now = now();
     Ok(Json(serde_json::json!({
         "summary": stats::today_summary(&db, now)?,
@@ -547,7 +562,7 @@ async fn activity_page(State(db): State<Db>, headers: HeaderMap) -> Result<Html<
     ))
 }
 
-async fn api_activity(State(db): State<Db>) -> Result<Json, AppError> {
+async fn api_activity(State(db): State<Db>) -> Result<Json, ApiError> {
     Ok(Json(serde_json::to_value(stats::activity(&db, now())?)?))
 }
 
@@ -560,12 +575,12 @@ struct LimitParams {
 async fn api_emergencies(
     State(db): State<Db>,
     Query(q): Query<LimitParams>,
-) -> Result<Json, AppError> {
+) -> Result<Json, ApiError> {
     let limit = q.limit.unwrap_or(20).clamp(1, 500);
     Ok(Json(serde_json::to_value(stats::emergency_log(&db, limit)?)?))
 }
 
-async fn api_aircraft(State(db): State<Db>, Query(q): Query<SortParams>) -> Result<Json, AppError> {
+async fn api_aircraft(State(db): State<Db>, Query(q): Query<SortParams>) -> Result<Json, ApiError> {
     // The JSON API stays a full list; pagination is a UI concern (PLAN.md step 3).
     let filter = q.filter();
     let rows = stats::aircraft_sorted(&db, &q.sort, &q.dir, &filter, u32::MAX, 0, now())?;
@@ -627,6 +642,19 @@ async fn aircraft_profile(
     headers: HeaderMap,
 ) -> Result<Response, AppError> {
     let hex = hex.to_lowercase();
+    // A path segment is user input: `/aircraft/<10 KB of anything>` used to be
+    // echoed into the error page verbatim. Reject non-addresses before they
+    // reach the database or the page, and never echo the rejected text.
+    if !valid_hex(&hex) {
+        let body = ErrorTemplate {
+            title: "Not in the ledger",
+            message: "That is not an ICAO address.".to_string(),
+            detail: "A hex address is one to eight hexadecimal digits, like a1b2c3. Search the fleet from the dashboard instead.",
+            tar1090: tar1090_base(&headers),
+        }
+        .render()?;
+        return Ok((StatusCode::NOT_FOUND, Html(body)).into_response());
+    }
     let Some(row) = stats::aircraft_by_hex(&db, &hex)? else {
         let body = ErrorTemplate {
             title: "Not in the ledger",
@@ -665,10 +693,13 @@ async fn aircraft_profile(
 async fn api_aircraft_hex(
     State(db): State<Db>,
     axum::extract::Path(hex): axum::extract::Path<String>,
-) -> Result<Json, AppError> {
+) -> Result<Json, ApiError> {
     let hex = hex.to_lowercase();
+    if !valid_hex(&hex) {
+        return Err(ApiError(AppError::new(StatusCode::NOT_FOUND, "not an ICAO address")));
+    }
     let Some(row) = stats::aircraft_by_hex(&db, &hex)? else {
-        return Err(AppError(StatusCode::NOT_FOUND, format!("unknown aircraft {hex}")));
+        return Err(ApiError(AppError::new(StatusCode::NOT_FOUND, format!("unknown aircraft {hex}"))));
     };
     let enrich = stats::enrichment_for(&db, &hex)?;
     let callsigns = stats::callsigns_for(&db, &hex)?;
@@ -683,22 +714,22 @@ async fn api_aircraft_hex(
 impl From<rusqlite::Error> for AppError {
     fn from(e: rusqlite::Error) -> Self {
         tracing::error!("db: {e}");
-        AppError(StatusCode::INTERNAL_SERVER_ERROR, "internal error".into())
+        AppError::internal("The ledger could not be read.")
     }
 }
 impl From<askama::Error> for AppError {
     fn from(e: askama::Error) -> Self {
         tracing::error!("template: {e}");
-        AppError(StatusCode::INTERNAL_SERVER_ERROR, "internal error".into())
+        AppError::internal("The page could not be rendered.")
     }
 }
 impl From<serde_json::Error> for AppError {
     fn from(e: serde_json::Error) -> Self {
         tracing::error!("json: {e}");
-        AppError(StatusCode::INTERNAL_SERVER_ERROR, "internal error".into())
+        AppError::internal("The response could not be encoded.")
     }
 }
-async fn api_stats(State(db): State<Db>) -> Result<Json, AppError> {
+async fn api_stats(State(db): State<Db>) -> Result<Json, ApiError> {
     let mut v = serde_json::to_value(stats::stats(&db, now())?)?;
     v["now"] = serde_json::json!(now());
     Ok(Json(v))
@@ -710,7 +741,7 @@ impl IntoResponse for Json {
     fn into_response(self) -> Response {
         match serde_json::to_vec(&self.0) {
             Ok(body) => ([(header::CONTENT_TYPE, "application/json")], body).into_response(),
-            Err(e) => AppError::from(e).into_response(),
+            Err(e) => ApiError::from(AppError::from(e)).into_response(),
         }
     }
 }
@@ -742,10 +773,125 @@ async fn app_js() -> impl IntoResponse {
     )
 }
 
-struct AppError(StatusCode, String);
+/// Any unmatched path. A miss gets the same shell and the same way back as a
+/// dead hex link; `/api/*` keeps answering JSON.
+async fn not_found(uri: axum::http::Uri, headers: HeaderMap) -> Response {
+    if uri.path().starts_with("/api/") {
+        return ApiError(AppError::new(StatusCode::NOT_FOUND, "no such endpoint")).into_response();
+    }
+    let rendered = ErrorTemplate {
+        title: "Not in the ledger",
+        message: "That page does not exist.".to_string(),
+        detail: "The dashboard, Today and Activity are the three pages. Search the fleet from the dashboard.",
+        tar1090: tar1090_base(&headers),
+    }
+    .render();
+    match rendered {
+        Ok(html) => (StatusCode::NOT_FOUND, Html(html)).into_response(),
+        Err(e) => {
+            tracing::error!("error template: {e}");
+            (StatusCode::NOT_FOUND, "Not found").into_response()
+        }
+    }
+}
+
+/// The one error surface. Every failure is a page in the same shell as every
+/// other page: a locked database used to answer `500 internal error` as bare
+/// text on a white background, which is indistinguishable from a dead server
+/// and offers no way back.
+struct AppError {
+    status: StatusCode,
+    message: String,
+    tar1090: String,
+}
+
+/// What a 500 says. The owner is the only reader, so name the recovery.
+const SERVER_DETAIL: &str =
+    "The ledger could not be read or rendered. The poller keeps writing, so a reload in a \
+     moment usually clears it. If it persists, check `docker logs plane-stats`.";
+
+/// What a page-level 4xx says when it goes through `AppError` rather than
+/// building its own `ErrorTemplate` (the hex and miss pages do the latter).
+const CLIENT_DETAIL: &str =
+    "The dashboard, Today and Activity are the three pages. Search the fleet from the dashboard.";
+
+impl AppError {
+    fn new(status: StatusCode, message: impl Into<String>) -> Self {
+        Self { status, message: message.into(), tar1090: tar1090_from_env() }
+    }
+
+    fn internal(message: impl Into<String>) -> Self {
+        Self::new(StatusCode::INTERNAL_SERVER_ERROR, message)
+    }
+}
+
+/// `TAR1090_URL`, or empty when unset. A DB failure carries no request, so the
+/// error page cannot derive the map base from `Host`; without this it would
+/// have to guess. Empty means the template drops the map pill.
+fn tar1090_from_env() -> String {
+    std::env::var("TAR1090_URL")
+        .map(|u| u.trim().trim_end_matches('/').to_string())
+        .unwrap_or_default()
+}
 
 impl IntoResponse for AppError {
     fn into_response(self) -> Response {
-        (self.0, self.1).into_response()
+        let rendered = ErrorTemplate {
+            title: if self.status.is_server_error() { "Something broke" } else { "Not in the ledger" },
+            message: self.message.clone(),
+            detail: if self.status.is_server_error() { SERVER_DETAIL } else { CLIENT_DETAIL },
+            tar1090: self.tar1090.clone(),
+        }
+        .render();
+        match rendered {
+            Ok(html) => (self.status, Html(html)).into_response(),
+            // The error page itself failed. Never panic on the failure path.
+            Err(e) => {
+                tracing::error!("error template: {e}");
+                (self.status, self.message).into_response()
+            }
+        }
+    }
+}
+
+/// API failures stay JSON: a client parsing `/api/*` should not receive a page.
+struct ApiError(AppError);
+
+impl From<AppError> for ApiError {
+    fn from(e: AppError) -> Self {
+        ApiError(e)
+    }
+}
+
+impl From<rusqlite::Error> for ApiError {
+    fn from(e: rusqlite::Error) -> Self {
+        ApiError(AppError::from(e))
+    }
+}
+
+impl From<askama::Error> for ApiError {
+    fn from(e: askama::Error) -> Self {
+        ApiError(AppError::from(e))
+    }
+}
+
+impl From<serde_json::Error> for ApiError {
+    fn from(e: serde_json::Error) -> Self {
+        ApiError(AppError::from(e))
+    }
+}
+
+impl IntoResponse for ApiError {
+    fn into_response(self) -> Response {
+        let body = serde_json::json!({
+            "error": self.0.message,
+            "status": self.0.status.as_u16(),
+        });
+        (
+            self.0.status,
+            [(header::CONTENT_TYPE, "application/json")],
+            body.to_string(),
+        )
+            .into_response()
     }
 }

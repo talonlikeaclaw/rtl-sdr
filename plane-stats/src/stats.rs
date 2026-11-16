@@ -573,6 +573,25 @@ impl PollerHealth {
             _ => Some(format!("Poller down — last poll {}", self.age_phrase())),
         }
     }
+
+    /// The empty live panel's version of the state, as a full sentence.
+    ///
+    /// An empty panel says "nothing overhead" only while polls are landing.
+    /// With the receiver silent the same empty list means the opposite — the
+    /// page would be claiming clear skies it cannot see. `None` means healthy.
+    pub fn sentence(&self) -> Option<String> {
+        match self.state() {
+            "live" => None,
+            "stale" => Some(format!(
+                "The receiver stalled {} — nothing new is being logged, so this is not clear skies.",
+                self.age_phrase()
+            )),
+            _ => Some(format!(
+                "The poller stopped {} — nothing is being logged, so this is not clear skies.",
+                self.age_phrase()
+            )),
+        }
+    }
 }
 
 /// Per-flag totals, so a filter chip can say how many rows it would match
@@ -1616,5 +1635,17 @@ mod tests {
         assert!(PollerHealth::new(Some(90.0)).alert().unwrap().starts_with("Receiver stalled"));
         assert!(PollerHealth::new(Some(7200.0)).alert().unwrap().starts_with("Poller down"));
         assert!(PollerHealth::new(None).alert().is_some());
+    }
+
+    /// The live panel is empty both when the sky is clear and when the receiver
+    /// is dead. Only the poller's health tells them apart, and the panel must
+    /// never let a dead receiver read as clear skies.
+    #[test]
+    fn live_panel_never_claims_clear_skies_when_the_poller_is_not_live() {
+        assert_eq!(PollerHealth::new(Some(4.0)).sentence(), None);
+        for age in [Some(90.0), Some(7200.0), None] {
+            let s = PollerHealth::new(age).sentence().expect("a sentence when not live");
+            assert!(s.contains("not clear skies"), "{s}");
+        }
     }
 }

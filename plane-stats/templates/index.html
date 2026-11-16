@@ -68,6 +68,7 @@
         <form id="fleet-controls" hx-get="/partials/table" hx-target="#fleet"
               hx-include="#fleet-sort, #fleet-dir">
           <input id="fleet-search" class="search" type="search" name="q" value="{{ q }}"
+                 maxlength="64" spellcheck="false" autocapitalize="none" enterkeyhint="search"
                  placeholder="Search hex, callsign, registration, type, owner, operator…"
                  hx-get="/partials/table" hx-trigger="input changed delay:400ms, search"
                  hx-target="#fleet" hx-include="#fleet-controls, #fleet-sort, #fleet-dir" aria-label="Search fleet">
@@ -199,7 +200,7 @@
               </tr>
               {% endfor %}
               {% if recent.is_empty() %}
-              <tr><td colspan="3">No aircraft recorded yet.</td></tr>
+              <tr><td colspan="3" class="empty-row">No aircraft recorded yet. The first arrival appears here once the poller has heard it.</td></tr>
               {% endif %}
             </tbody>
           </table>
@@ -218,6 +219,8 @@
 
     <footer>LOCAL LEDGER · SQLITE · NO CLOUD</footer>
   </div>
+
+  <div id="net-note" class="net-note" role="status"></div>
   <script>
     // Swapping #fleet throws away the focused sort button. Put focus back on
     // the column the user just sorted, or keyboard sorting loses its place.
@@ -233,6 +236,32 @@
       const btn = [...document.querySelectorAll("#fleet th .sort")].find((b) => b.textContent.trim() === label);
       if (btn) btn.focus();
     });
+
+    // htmx leaves a failed swap in place and says nothing, so a 500 or a dropped
+    // connection looked exactly like a receiver that had gone quiet: every panel
+    // froze on its last good data with no explanation. One notice, cleared by
+    // the next successful request.
+    (() => {
+      const note = document.getElementById("net-note");
+      if (!note) return;
+      const show = (text) => {
+        note.textContent = text;
+        note.classList.add("show");
+      };
+      const hide = () => note.classList.remove("show");
+      document.body.addEventListener("htmx:responseError", (e) => {
+        show(`Update failed (${e.detail.xhr.status}). These panels are showing their last good data.`);
+      });
+      document.body.addEventListener("htmx:sendError", () => {
+        show("Cannot reach the server. These panels are showing their last good data.");
+      });
+      document.body.addEventListener("htmx:timeout", () => {
+        show("The server took too long to answer. These panels are showing their last good data.");
+      });
+      document.body.addEventListener("htmx:afterRequest", (e) => {
+        if (e.detail.successful) hide();
+      });
+    })();
   </script>
 </body>
 </html>

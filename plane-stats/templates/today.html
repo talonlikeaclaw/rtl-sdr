@@ -85,7 +85,7 @@
               </tr>
               {% endfor %}
               {% if records.is_empty() %}
-              <tr><td colspan="5">No aircraft has reported altitude, speed or range today.</td></tr>
+              <tr><td colspan="5" class="empty-row">No aircraft has reported altitude, speed or range today.</td></tr>
               {% endif %}
             </tbody>
           </table>
@@ -136,7 +136,7 @@
               </tr>
               {% endfor %}
               {% if new.is_empty() %}
-              <tr><td colspan="5">No new aircraft today.</td></tr>
+              <tr><td colspan="5" class="empty-row">No new aircraft today. A first sighting lands here the moment the poller hears it.</td></tr>
               {% endif %}
             </tbody>
           </table>

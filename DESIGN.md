@@ -359,11 +359,39 @@ its matching row count in `.chip-n`, so a flag that matches nothing says `0` ins
 returning an empty table with no explanation.
 
 ### Error page
-`templates/error.html` renders an unknown hex in the same shell as every other page, at a
-real 404 status. Display title `Not in the ledger`, a Muted Slate tagline naming the hex
-with the `.meta` suffix, and one panel whose eyebrow is `What happened` over a single
-`.empty-note` sentence: what the receiver did not log, then the way back. No illustration,
-no apology, no second accent.
+`templates/error.html` is the one error surface, and every failure reaches it: an unknown
+hex, an unmatched path (the router's fallback), and a 500 from a locked database or a
+failed render. All of them are a page in the same shell as every other page — axum's
+default is a bare `404 Not Found` in plain text, which is the one thing this app does not
+have. A 404 carries the Display title `Not in the ledger`, a Muted Slate tagline naming
+the problem, and one panel whose eyebrow is `What happened` over a single `.empty-note`
+sentence: what happened, then the way back. A 500 keeps the shell and swaps the title for
+`Something broke` and the sentence for the recovery (`docker logs plane-stats`). No
+illustration, no apology, no second accent. `/api/*` answers JSON instead, so a client
+never has to parse a page.
+
+A path segment is user input: `/aircraft/<anything>` validates as one to eight hex digits
+before it reaches the database or the page, and the rejected text is never echoed back.
+
+### Connection notice
+`#net-note` is a fixed line at the bottom of the viewport, a direct child of `<body>` —
+`.glass` uses `backdrop-filter`, which makes it the containing block for fixed
+descendants, so a notice inside a panel would be positioned against the panel. htmx leaves
+a failed swap in place and says nothing, so a 500 or a dropped connection used to look
+exactly like a receiver that had gone quiet: every panel froze on its last good data with
+no explanation. The notice names the failure and the state of the data (`These panels are
+showing their last good data.`), carries the same amber hairline as the poller pill, and
+clears on the next successful request. It is `role="status"`, so it is announced rather
+than only seen.
+
+### Empty states
+An empty table body is a state, not a blank. `.empty-row` gives it room, the Muted Slate
+voice, and the one action that leaves it: a filtered fleet offers `Clear them`, an empty
+ledger says when the first row lands, an empty emergency log names the squawks that would
+fill it. The live panel is the exception that proves the rule — an empty list means "clear
+skies" only while polls are landing, so with the poller stalled or down the same cell
+carries `PollerHealth::sentence()` in Emergency Amber instead. An empty panel must never
+let a dead receiver read as a quiet sky.
 
 ### Charts and heatmap (signature)
 The `/today` histogram is a 24-column CSS grid, 120px tall, with three hairline

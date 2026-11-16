@@ -15,7 +15,10 @@
   </thead>
   <tbody>
     {% if live.is_empty() %}
-    <tr><td colspan="9">Nothing overhead right now.</td></tr>
+    <tr><td colspan="9" class="empty-row">
+      {% if let Some(s) = poller.sentence() %}<span class="warn">{{ s }}</span>
+      {% else %}Nothing overhead right now — the receiver is polling and hearing nothing.{% endif %}
+    </td></tr>
     {% endif %}
     {% for a in live %}
     <tr>

@@ -247,7 +247,7 @@
       "name": "Error Page",
       "kind": "custom",
       "refersTo": "panel",
-      "description": "An unknown hex rendered in the normal shell at a real 404: Display title, tagline naming the hex, one panel whose eyebrow is 'What happened' over a single empty-note sentence.",
+      "description": "The one error surface: every failure — unknown hex, unmatched path, 500 — renders in the normal shell at its real status, with a Display title, a Muted Slate tagline naming the problem, and one panel whose eyebrow is 'What happened' over a single .empty-note sentence carrying the way back.",
       "html": "<section class=\"glass panel\">\n  <h2>What happened</h2>\n  <p class=\"empty-note\">The receiver has not logged this address. Check the hex, or search the fleet from the dashboard.</p>\n</section>",
       "css": ".glass { position: relative; border-radius: 16px; border: 1px solid rgba(255,255,255,0.09); background: linear-gradient(160deg, rgba(255,255,255,0.055), rgba(255,255,255,0.018)); box-shadow: 0 18px 44px -26px rgba(0,0,0,0.85), inset 0 1px 0 rgba(255,255,255,0.1); backdrop-filter: blur(20px) saturate(135%); outline: 1px solid rgba(255,255,255,0.035); outline-offset: 5px; } .panel { padding: 1.2rem 1.35rem 1.35rem; margin-bottom: 1.25rem; } .panel > h2 { display: flex; align-items: center; gap: 0.55rem; margin: 0 0 0.9rem; font-size: 0.75rem; font-weight: 600; letter-spacing: 0.16em; text-transform: uppercase; color: var(--faint, #8b97a8); } .panel > h2::before { content: \"\"; width: 2px; height: 0.9em; border-radius: 1px; background: var(--accent-dim, rgba(158,197,232,0.55)); } .empty-note { margin: 0.3rem 0 0; font-size: 0.8rem; color: var(--muted, rgba(203,213,225,0.6)); }"
     }
