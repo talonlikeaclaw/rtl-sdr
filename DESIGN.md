@@ -213,6 +213,22 @@ stack, fix the control; do not add a font.
 **The Tracked Caps Rule.** Uppercase only at 0.7–0.75rem with at least 0.1em tracking.
 Body copy and data are never uppercase.
 
+### Browser surfaces
+
+The parts we did not draw still ship with the design, and their defaults belong to no
+palette here. Three are themed from the tokens:
+
+- **Selection** is `rgba(158, 197, 232, 0.3)` with Instrument Text on top. Chrome's
+  default is a saturated blue from outside the system.
+- **The caret** is full Sky Blue. Left at `auto` it inherits the text colour, which makes
+  a focused search field look inert.
+- **The link underline** is `1px` at `0.18em` offset. The UA default lands on the
+  descenders of 13px text.
+
+Scrollbars are left native: `color-scheme: dark` already draws them in the right family,
+and a hand-rolled track would be the one surface that is neither the browser's nor the
+system's.
+
 ## Layout
 
 One column, 1160px max, centred. Body padding is
@@ -232,11 +248,22 @@ desktop and still fits a phone without a second layout.
   running to the right edge, so thirteen tiles read as three ideas.
 - **Tables** live in a `.table-wrap` with `overflow-x: auto` and a 10px radius; the page
   never scrolls horizontally, the table does. A `local`/`scroll` background pair draws a
-  24px shadow on the right edge only while there is more table to reach.
+  14px vignette at each edge — sized to the cell padding, so it never reaches the content.
+  The `local` left layer travels with the content and fades out at the start; the `scroll`
+  right layer is pinned to the edge. It is a soft well edge, not a "more to the right"
+  indicator: an attachment pair cannot express "visible unless at the end", and at 24px
+  the right layer covered the last column's links once the table was scrolled fully.
 - **The fleet table pins its hex column** (`position: sticky; left: 0`) so the row keeps
   its identity while the remaining twelve columns scroll under it on a phone.
-- **Live panel** is capped at `40vh` with `scrollbar-gutter: stable` and a sticky header,
-  so a changing row count cannot push the rest of the page.
+- **A table that can grow without bound is capped** with `scrollbar-gutter: stable` and a
+  sticky header. Two cases, one pattern: the live panel at `40vh` (a changing row count
+  must not push the rest of the page) and the `/today` "New today" tail at `60vh` (a busy
+  day adds hundreds of first sightings; uncapped, 154 rows made a 5,940px digest). Every
+  row stays reachable by scrolling — nothing is hidden behind a link that does not exist.
+- **The fleet filter label column** is `min-width: 7.4rem`, not the `6.4rem` it started
+  at: "Max altitude" measures 108px and wrapped at the old basis, which made that one row
+  taller than the others. `flex: 0 0 auto` with a `min-width` keeps every label on one
+  edge and lets a longer one grow visibly instead of wrapping silently.
 - **Charts** use a two-column grid, `auto minmax(0, 1fr)`, with a 2.1rem y-axis column;
   the SVG scales to width with `height: auto`.
 - **Breakpoint:** one, at 640px — panel padding drops to `1rem 0.9rem 1.1rem`, card
@@ -338,6 +365,15 @@ cell. The button inherits the header's type, carries the `▾`/`▴` glyph as a 
 carries `aria-sort="ascending|descending"` only when it is the active column. Sorting must
 never be mouse-only.
 
+### Pager
+`Prev` and `Next` are `<button type="button">` for the same reason the sort headers are:
+an `<a>` carrying only `hx-get` and no `href` takes no focus and has no link role, which
+left the pager mouse-only. The button strips its chrome (`border: 0; background: none;
+font: inherit`) so it reads as the text it replaced, keeps the 24×24 hit area from the
+shared padding/negative-margin pair, and takes a 2px Sky Blue Dim `:focus-visible` outline.
+At the first or last page the control is a `disabled` button, not a dead link; the
+accessible name is `Prev page` / `Next page`, which contains the visible label.
+
 ### Status pill (poller health)
 The fourth header pill is the only element allowed to report the receiver's state. It
 carries `.status` plus one of `.live` / `.stale` / `.down`:
@@ -393,6 +429,13 @@ skies" only while polls are landing, so with the poller stalled or down the same
 carries `PollerHealth::sentence()` in Emergency Amber instead. An empty panel must never
 let a dead receiver read as a quiet sky.
 
+A key-value panel is the same rule. The profile's Identity panel is one table of
+`<th>`/`<td>` pairs, and an aircraft with no OpenSky row used to render a single
+`Registration` row holding `-` — a one-column table saying nothing. It now renders one
+`.empty-row` across both columns: `No registration data. This hex is not in the OpenSky
+database — the ledger still has every time the receiver heard it.` The panel still answers
+the question it exists to answer, which is "why is this blank".
+
 ### Charts and heatmap (signature)
 The `/today` histogram is a 24-column CSS grid, 120px tall, with three hairline
 gridlines at 0/50/100% and bars filled with a Sky Blue → Sky Blue Dim vertical gradient;
@@ -400,9 +443,11 @@ the hovered or focused column's bar turns Signal Mint and a fixed-position toolt
 appears. The `/activity` heatmap is a 7×24 grid with a 2.4rem day-label column, cells
 `clamp(14px, 2vw, 22px)` tall at 3px radius, filled in five alpha steps of Sky Blue
 (0.16 / 0.3 / 0.46 / 0.66 / 1.0) over a 3.5% white base, with the peak cell outlined in
-Signal Mint. Line charts are inline SVG in a fixed 640×120 viewBox: 7% white gridlines,
-a 12% Sky Blue area fill, a 1.6px Sky Blue line with round joins, and 3px dots that turn
-Signal Mint on hover. All strokes use `vector-effect: non-scaling-stroke`.
+Signal Mint. The day labels are `justify-content: flex-end` so they form one right edge
+against the grid; left-aligned, the `0.3rem` gutter fell *after* the text and the labels
+floated in a 38px column. Line charts are inline SVG in a fixed 640×120 viewBox: 7% white
+gridlines, a 12% Sky Blue area fill, a 1.6px Sky Blue line with round joins, and 3px dots
+that turn Signal Mint on hover. All strokes use `vector-effect: non-scaling-stroke`.
 
 Every chart ships two paths to the same numbers, because neither one covers touch,
 keyboard and screen reader alone:
@@ -446,7 +491,12 @@ One noun per concept, everywhere. These are the words; anything else is a bug.
 
 - **A numeral carries its unit.** `7` over `busiest hour` says nothing; `7 aircraft`
   does. Cards put the unit in `<span class="unit">`, table headers put it in
-  parentheses (`Max alt (ft)`).
+  parentheses (`Max alt (ft)`). A supporting line that counts the same thing still names
+  it: `558 new in the last 7 days`, not `558 in the last 7 days`.
+- **A label that names the direction does not repeat it.** `min_baro_rate` is stored as
+  the most negative climb, so `Max descent (ft/min)` renders its magnitude (`1408`).
+  `Max climb` keeps the explicit sign (`+2176`, `-704`) because "Climb" does not name a
+  direction and an aircraft that only ever descended has a negative max.
 - **Name the action, not the gesture.** `Open live map`, `Show trace`, `Clear all`.
   A link's text must survive being read out of context, so table links carry an
   `aria-label` with the hex: `Show c0603c trace`.

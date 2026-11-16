@@ -48,6 +48,7 @@
           <table>
             <caption class="sr-only">Registration, model and operator for {{ row.hex }}</caption>
             <tbody>
+              {% if row.registration.is_some() || enrich.is_some() %}
               <tr><th>Registration</th><td class="mono">{{ row.registration.as_deref().unwrap_or("-") }}</td></tr>
               {% if let Some(m) = enrich %}
               <tr><th>Model</th><td>{{ m.model.as_deref().unwrap_or("-") }}{% if let Some(tc) = m.typecode %} ({{ tc }}){% endif %}</td></tr>
@@ -68,6 +69,9 @@
               <tr><th>Notes</th><td>{{ n }}</td></tr>
               {% endif %}
               {% endif %}
+              {% else %}
+              <tr><td colspan="2" class="empty-row">No registration data. This hex is not in the OpenSky database — the ledger still has every time the receiver heard it.</td></tr>
+              {% endif %}
             </tbody>
           </table>
         </div>
@@ -87,7 +91,7 @@
               <tr><th>Max range (nm)</th><td>{% if let Some(v) = row.max_range_nm %}{{ v }}{% else %}-{% endif %}</td></tr>
               <tr><th>Strongest signal (dBFS)</th><td>{% if let Some(v) = row.max_rssi_dbfs %}{{ v }}{% else %}-{% endif %}</td></tr>
               <tr><th>Max climb (ft/min)</th><td>{{ row.max_climb_str() }}</td></tr>
-              <tr><th>Max descent (ft/min)</th><td>{% if let Some(v) = row.min_baro_rate %}{{ v }}{% else %}-{% endif %}</td></tr>
+              <tr><th>Max descent (ft/min)</th><td>{{ row.max_descent_str() }}</td></tr>
             </tbody>
           </table>
         </div>

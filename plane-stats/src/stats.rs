@@ -25,6 +25,12 @@ const DORMANT_SECS: f64 = 7.0 * 86_400.0;
 const RANGE_DAYS: i64 = 90;
 const MESSAGES_DAYS: i64 = 30;
 
+/// A stored baro rate is the most negative climb, so the descent row flips the
+/// sign: the label already says "descent".
+fn descent_str(v: Option<i64>) -> String {
+    v.map(|v| v.abs().to_string()).unwrap_or_else(|| "-".into())
+}
+
 #[derive(Debug, serde::Serialize)]
 pub struct AircraftRow {
     pub hex: String,
@@ -151,6 +157,12 @@ impl AircraftRow {
     /// descended has a negative max, which must not render as `+-1200`.
     pub fn max_climb_str(&self) -> String {
         self.max_baro_rate.map(|v| format!("{v:+}")).unwrap_or_else(|| "-".into())
+    }
+    /// The most negative baro rate as a positive descent rate. The label
+    /// already names the direction, so `-1408` under "Max descent" reads as a
+    /// double negative; `climb_str` keeps its sign because "Climb" does not.
+    pub fn max_descent_str(&self) -> String {
+        descent_str(self.min_baro_rate)
     }
     pub fn age_str(&self) -> String {
         self.last_msg_age.map(|v| format!("{v:.0}")).unwrap_or_else(|| "-".into())
@@ -1647,5 +1659,15 @@ mod tests {
             let s = PollerHealth::new(age).sentence().expect("a sentence when not live");
             assert!(s.contains("not clear skies"), "{s}");
         }
+    }
+
+    /// `min_baro_rate` is stored as the most negative climb, so the descent
+    /// row has to flip the sign: the label already says "descent" and
+    /// `-1408` under it reads as a double negative.
+    #[test]
+    fn max_descent_reads_as_a_positive_rate() {
+        assert_eq!(super::descent_str(Some(-1408)), "1408");
+        assert_eq!(super::descent_str(Some(0)), "0");
+        assert_eq!(super::descent_str(None), "-");
     }
 }

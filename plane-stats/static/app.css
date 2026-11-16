@@ -22,9 +22,24 @@
 * { box-sizing: border-box; }
 
 /* Without this, `color-scheme: dark` hands every bare <a> Chrome's UA lavender
-   (rgb(158,158,255)) — the only off-palette colour in the system. */
-a { color: var(--accent); }
+   (rgb(158,158,255)) — the only off-palette colour in the system. The UA
+   underline also lands on the descenders of 13px text, so it is pushed clear
+   and kept hairline. */
+a {
+  color: var(--accent);
+  text-underline-offset: 0.18em;
+  text-decoration-thickness: 1px;
+}
 a:hover { color: #c3ddf5; }
+
+/* Browser surfaces: the parts we did not draw still ship with the design.
+   Chrome's default selection is a saturated blue from no palette here, and
+   the caret inherits the text colour, so a focused field looks inert. */
+::selection {
+  background: rgba(158, 197, 232, 0.3);
+  color: var(--text);
+}
+input, textarea { caret-color: var(--accent); }
 
 .sr-only {
   position: absolute;
@@ -393,14 +408,17 @@ h1 {
   border: 1px solid rgba(255, 255, 255, 0.05);
   background-color: rgba(6, 10, 16, 0.32);
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04);
-  /* Shadow only while scrolled: the local/scroll attachment pair makes the
-     right-hand edge fade in exactly when there is more table to reach. */
+  /* A soft vignette at each edge, sized to the cell padding (0.8rem) so it
+     never reaches the content: at 24px it covered the last column's links
+     whenever the table was scrolled to its end. `local` on the left layer
+     means it travels with the content and fades out once there is nothing
+     to scroll back to. */
   background-image:
     linear-gradient(to right, rgba(6, 10, 16, 0.9), rgba(6, 10, 16, 0)),
     linear-gradient(to right, rgba(6, 10, 16, 0), rgba(6, 10, 16, 0.9));
   background-position: 0 0, 100% 0;
   background-repeat: no-repeat;
-  background-size: 24px 100%, 24px 100%;
+  background-size: 14px 100%, 14px 100%;
   background-attachment: local, scroll;
 }
 
@@ -434,13 +452,19 @@ td { overflow-wrap: break-word; }
 }
 #fleet th.col-callsign { z-index: 2; background: #0d1119; }
 
-/* Live panel: a changing row count must not push the page below it. */
-.live-wrap {
-  max-height: 40vh;
+/* A table that can grow without bound is capped and scrolls inside its own
+   well with the header pinned. Two cases, one pattern: the live panel (a
+   changing row count must not push the page below it) and the digest's tail
+   (a busy day can add hundreds of first sightings). */
+.live-wrap,
+.tall-wrap {
   overflow-y: auto;
   scrollbar-gutter: stable;
 }
-.live-wrap thead th {
+.live-wrap { max-height: 40vh; }
+.tall-wrap { max-height: 60vh; }
+.live-wrap thead th,
+.tall-wrap thead th {
   position: sticky;
   top: 0;
   z-index: 1;
@@ -546,9 +570,6 @@ footer {
   .panel { padding: 1rem 0.9rem 1.1rem; }
   .cards { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .meta { display: none; }
-  /* A 6.4rem label column leaves ~200px for eleven chips on a phone. */
-  .filter-label { flex: 1 0 100%; }
-  .hero-actions { gap: 0.4rem; }
 }
 
 /* The card grid reflows on its own width, not the viewport's. At 200% text a
@@ -593,9 +614,21 @@ input.search:focus { border-color: var(--accent-dim); }
 }
 .filter-row:last-of-type { margin-bottom: 0.9rem; }
 .filter-label {
-  flex: 0 0 6.4rem;
+  /* 7.4rem, not 6.4rem: "Max altitude" measures 108px and wrapped at the old
+     basis, which made that one row taller than the others. `auto` + `min-width`
+     keeps every label on one edge today and lets a longer one grow visibly
+     instead of wrapping silently. */
+  flex: 0 0 auto;
+  min-width: 7.4rem;
   font-size: 0.72rem; font-weight: 600; letter-spacing: 0.1em; text-transform: uppercase;
   color: var(--faint);
+}
+/* The label takes its own line, so the chips get the full width instead of the
+   ~200px a label column would leave them on a phone. This has to sit after the
+   rule above: a media query adds no specificity, so the later plain rule won
+   and the phone kept the column. */
+@media (max-width: 640px) {
+  .filter-label { flex: 1 0 100%; }
 }
 .chips { display: flex; flex-wrap: wrap; align-items: center; gap: 0.45rem; min-width: 0; }
 
@@ -648,9 +681,22 @@ td a {
   padding: 0.42rem 0.3rem;
   margin: -0.42rem -0.3rem;
 }
-.pager-link { color: var(--accent); text-decoration: none; cursor: pointer; }
-.pager-link:hover { text-decoration: underline; }
-.pager-link.disabled { color: var(--muted); opacity: 0.45; cursor: default; }
+/* A real <button>, like the sort headers: an <a> with no href takes no focus
+   and has no link role, which left the pager mouse-only. */
+.pager-link {
+  border: 0;
+  background: none;
+  font: inherit;
+  color: var(--accent);
+  cursor: pointer;
+}
+.pager-link:hover:not(:disabled) { text-decoration: underline; }
+.pager-link:disabled { color: var(--muted); opacity: 0.45; cursor: default; }
+.pager-link:focus-visible {
+  outline: 2px solid var(--accent-dim);
+  outline-offset: 2px;
+  border-radius: 3px;
+}
 
 /* Focus ------------------------------------------------------------- */
 
@@ -731,6 +777,12 @@ input.search:focus,
   display: flex;
   flex-wrap: wrap;
   gap: 0.5rem;
+}
+/* After the base rule, not in the 640px block above: a media query adds no
+   specificity, so a later plain rule silently won. The pills need the tighter
+   gap to stay on one row beside the brand on a phone. */
+@media (max-width: 640px) {
+  .hero-actions { gap: 0.4rem; }
 }
 
 td.links a {
@@ -930,6 +982,9 @@ td.links a:hover { text-decoration: underline; }
 .heatmap-day {
   display: flex;
   align-items: center;
+  /* Right-aligned so the labels form one edge against the grid; left-aligned
+     they leave the 0.3rem gutter as dead space after the text. */
+  justify-content: flex-end;
   padding-right: 0.3rem;
   letter-spacing: 0.04em;
 }

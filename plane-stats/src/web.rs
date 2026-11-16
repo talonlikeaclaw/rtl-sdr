@@ -86,12 +86,6 @@ fn valid_hex(hex: &str) -> bool {
     (1..=8).contains(&hex.len()) && hex.bytes().all(|b| b.is_ascii_hexdigit())
 }
 
-fn ts(epoch: f64) -> String {
-    chrono::DateTime::from_timestamp(epoch as i64, 0).expect("valid ts").with_timezone(&chrono::Local)
-        .format("%Y-%m-%d %H:%M:%S")
-        .to_string()
-}
-
 #[derive(Template)]
 #[template(path = "index.html")]
 struct IndexTemplate {

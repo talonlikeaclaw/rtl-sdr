@@ -9,12 +9,13 @@ const POLL_INTERVAL: Duration = Duration::from_secs(10);
 const VISIT_GAP_SECS: f64 = 600.0;
 const PRUNE_AFTER_DAYS: f64 = 90.0;
 
-/// `alt_baro` is either a number or the string "ground".
+/// `alt_baro` is either a number or the string "ground". The string itself
+/// carries no information, so it is parsed and discarded.
 #[derive(Deserialize, Debug)]
 #[serde(untagged)]
 enum Alt {
     Ft(f64),
-    Ground(String),
+    Ground(serde::de::IgnoredAny),
 }
 
 #[derive(Deserialize, Debug)]
@@ -27,7 +28,6 @@ struct Aircraft {
     rssi: Option<f64>,
     squawk: Option<String>,
     category: Option<String>,
-    messages: Option<i64>,
     seen: Option<f64>,
     lat: Option<f64>,
     lon: Option<f64>,
@@ -244,7 +244,7 @@ fn record_poll(db: &Db, now: f64, live: &[&Aircraft], messages: i64) -> rusqlite
                 None => {
                     visits.execute(params![hex.as_str(), now])?;
                 }
-                Some((start_ts, end_ts)) if now - end_ts > VISIT_GAP_SECS => {
+                Some((_, end_ts)) if now - end_ts > VISIT_GAP_SECS => {
                     visits.execute(params![hex.as_str(), now])?;
                 }
                 Some((start_ts, _)) => {
