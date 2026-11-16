@@ -105,10 +105,11 @@ components:
 
 plane-stats is a dark instrument panel that happens to be a web page. The ground is
 near-black (`#070a0f`) with a faint 72px grid that fades out at the edges; three
-low-opacity orbs drift behind it; every panel floats above that ground as a frosted
-gauge face — a 160° white gradient at 5.5% falling to 1.8%, blurred, with a hairline
-of light along its top edge and a faint ring set 5px outside it, like the bezel of a
-cockpit dial. The header is closed by a 1px dashed line: a runway centerline.
+low-opacity orbs sit behind it, fixed and unmoving; every panel floats above that
+ground as a frosted gauge face — a 160° white gradient at 5.5% falling to 1.8%,
+blurred, with a hairline of light along its top edge and a faint ring set 5px outside
+it, like the bezel of a cockpit dial. The header is closed by a 1px dashed line: a
+runway centerline.
 
 The voice is night-watch quiet. This screen is looked at in a dark room, at a glance,
 by one person checking what is overhead and what was new today. So the interface never
@@ -281,7 +282,7 @@ Recurring geometry:
 - **2px accent ticks** — the bar before a panel eyebrow, the left-edge marker on each
   card, the gap between heatmap cells.
 - **1px dashed rule** under the header — the runway centerline, at 14% white.
-- **Circles** appear only as the three drifting orbs and the waveform bars' rounded caps.
+- **Circles** appear only as the three fixed orbs and the waveform bars' rounded caps.
 - **Hairline borders everywhere**: 1px at 9% white on panels and controls, 4.5% on table
   rows, 5% on wells.
 
@@ -358,11 +359,28 @@ The `/today` histogram is a 24-column CSS grid, 120px tall, with three hairline
 gridlines at 0/50/100% and bars filled with a Sky Blue → Sky Blue Dim vertical gradient;
 the hovered or focused column's bar turns Signal Mint and a fixed-position tooltip
 appears. The `/activity` heatmap is a 7×24 grid with a 2.4rem day-label column, cells
-`clamp(11px, 2vw, 22px)` tall at 3px radius, filled in five alpha steps of Sky Blue
+`clamp(14px, 2vw, 22px)` tall at 3px radius, filled in five alpha steps of Sky Blue
 (0.16 / 0.3 / 0.46 / 0.66 / 1.0) over a 3.5% white base, with the peak cell outlined in
 Signal Mint. Line charts are inline SVG in a fixed 640×120 viewBox: 7% white gridlines,
 a 12% Sky Blue area fill, a 1.6px Sky Blue line with round joins, and 3px dots that turn
 Signal Mint on hover. All strokes use `vector-effect: non-scaling-stroke`.
+
+Every chart ships two paths to the same numbers, because neither one covers touch,
+keyboard and screen reader alone:
+
+- **The grid is one tab stop.** `/app.js` gives each cell `data-tip` and an
+  `aria-label`, collapses the cells to a roving `tabindex`, and moves with
+  ←/→/↑/↓ plus Home/End. One shared `#chart-tip` follows hover, focus and tap.
+  A tap is the only path on touch, since `title` never appears there.
+- **A `<details class="chart-table">` holds the data as a real table** with
+  `<caption>` and `scope` headers. It is the screen reader's path, the touch
+  user's fallback when a cell is 10px wide, and the only way to read an exact
+  value rather than a shade of blue.
+
+The heatmap is an ARIA `grid`: `role="row"` wrappers use `display: contents` so
+the 25-column CSS grid is untouched, and each cell carries the full slot in its
+label ("Mon 14:00 · 5 aircraft") so the sparse hour header never has to be
+announced.
 
 ## Do's and Don'ts
 
@@ -382,6 +400,13 @@ Signal Mint on hover. All strokes use `vector-effect: non-scaling-stroke`.
   opinion.
 - **Do** give every auto-updating region a `<caption class="sr-only">` and `scope="col"`
   headers, and keep the skip link first in `<body>`.
+- **Do** give every text-sized control a 24×24 hit area (WCAG 2.5.8) by growing its
+  padding into the surrounding whitespace with an equal negative margin: `.pager-link`,
+  `td a`, `.chart-table > summary`, and `th .sort` (whose padding matches the `<th>`'s,
+  so the whole header cell is the target). The layout must not move.
+- **Do** let the card grid reflow on its own width. `.card-group` is a container and
+  `.cards` drops to 2 columns below 30rem and 1 below 10rem, so 200% text collapses the
+  grid instead of clipping every numeral.
 
 ### Don't:
 - **Don't** leave a bare `<a>` unstyled: `color-scheme: dark` hands it Chrome's UA
@@ -394,6 +419,22 @@ Signal Mint on hover. All strokes use `vector-effect: non-scaling-stroke`.
   no badge and no assertive live region.
 - **Don't** add scale, translate or bounce transitions. State changes are colour, border
   and background only.
+- **Don't** size a card grid by viewport width alone. A fixed 2- or 4-column count clips
+  the content at 200% text on every screen; the container query is what keeps 1.4.10
+  (Reflow) true. Every `.cards` needs a `.card-group` parent, or it has no container to
+  query.
+- **Don't** let a form field sit under 16px on a phone. iOS zooms the viewport on focus
+  and never zooms back; the mobile rule at the end of the stylesheet is the floor.
+- **Don't** convey a chart's values through `title` alone, and never ship a chart without
+  its `<details class="chart-table">` twin. `title` does not appear on tap or on focus.
+- **Don't** animate the background orbs, or add `will-change` to them. Every
+  `backdrop-filter` surface above them re-samples its backdrop each frame: measured
+  3–5 fps with the drift and 43–61 without, on the Pi. Static orbs are a performance
+  contract, not a style choice.
+- **Don't** put `backdrop-filter` on a `.card` or the search field. Both only ever sit
+  on a `.glass` panel, whose backdrop is already blurred, so the second blur is
+  invisible and costs a raster each. Blur belongs to the surfaces that meet the raw
+  body: `.glass`, `.pill`, `.mark`.
 - **Don't** fill a panel, card or row with Sky Blue; the selected chip is the single
   filled accent surface.
 - **Don't** place a tooltip inside a `.glass` panel: `backdrop-filter` makes the panel the

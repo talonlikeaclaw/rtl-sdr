@@ -6,6 +6,7 @@
   <meta name="theme-color" content="#060a15">
   <title>Activity · plane-stats</title>
   <link rel="stylesheet" href="/app.css?v=2">
+  <script src="/app.js" defer></script>
 </head>
 <body>
   <a class="skip" href="#main">Skip to content</a>
@@ -39,15 +40,22 @@
     <main id="main">
       <section class="glass panel" aria-label="Weekday and hour activity">
         <h2>Weekday × hour</h2>
-        <div class="heatmap" role="img" aria-label="Peak aircraft overhead for each weekday and local hour">
-          <div class="heatmap-corner" aria-hidden="true"></div>
-          {% for h in hours %}<div class="heatmap-hour" aria-hidden="true">{{ h }}</div>{% endfor %}
+        <p class="sr-only" id="heat-hint">Use the arrow keys to move between slots.</p>
+        <div class="heatmap" role="grid" aria-label="Peak aircraft overhead for each weekday and local hour" aria-describedby="heat-hint">
+          <div class="heatmap-head" role="row">
+            <div class="heatmap-corner" role="columnheader" aria-hidden="true"></div>
+            {% for h in hours %}<div class="heatmap-hour" role="columnheader" aria-hidden="true">{{ h }}</div>{% endfor %}
+          </div>
           {% for row in heatmap.rows %}
-          <div class="heatmap-day">{{ row.label }}</div>
-          {% for c in row.cells %}
-          <div class="heat-cell lvl-{{ c.level(heatmap.max) }}{% if c.count == heatmap.max && heatmap.max > 0 %} peak{% endif %}"
-               title="{{ c.title(row.label) }}"></div>
-          {% endfor %}
+          <div class="heatmap-row" role="row">
+            <div class="heatmap-day" role="rowheader">{{ row.label }}</div>
+            {% for c in row.cells %}
+            <div class="heat-cell lvl-{{ c.level(heatmap.max) }}{% if c.count == heatmap.max && heatmap.max > 0 %} peak{% endif %}"
+                 role="gridcell" tabindex="0"
+                 data-tip="{{ c.title(row.label) }}"
+                 aria-label="{{ c.title(row.label) }}"></div>
+            {% endfor %}
+          </div>
           {% endfor %}
         </div>
         <div class="heatmap-legend">
@@ -56,6 +64,28 @@
             <i class="heat-cell lvl-1"></i><i class="heat-cell lvl-2"></i><i class="heat-cell lvl-3"></i><i class="heat-cell lvl-4"></i><i class="heat-cell lvl-5"></i>
           more</span>
         </div>
+        <details class="chart-table">
+          <summary>Show as table</summary>
+          <div class="table-wrap">
+            <table>
+              <caption class="sr-only">Peak aircraft overhead for each weekday and local hour</caption>
+              <thead>
+                <tr>
+                  <th scope="col">Day</th>
+                  {% for h in hours_full %}<th scope="col">{{ h }}:00</th>{% endfor %}
+                </tr>
+              </thead>
+              <tbody>
+                {% for row in heatmap.rows %}
+                <tr>
+                  <th scope="row">{{ row.label }}</th>
+                  {% for c in row.cells %}<td>{{ c.count }}</td>{% endfor %}
+                </tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
+        </details>
       </section>
 
       <section class="glass panel" aria-label="Range by day">
@@ -83,6 +113,20 @@
             <div class="chart-axis"><span>{{ range.first_label }}</span><span>nm</span><span>{{ range.last_label }}</span></div>
           </div>
         </div>
+        <details class="chart-table">
+          <summary>Show as table</summary>
+          <div class="table-wrap">
+            <table>
+              <caption class="sr-only">Best range per day in nautical miles</caption>
+              <thead><tr><th scope="col">Day</th><th scope="col">Best range</th></tr></thead>
+              <tbody>
+                {% for p in range.points %}
+                <tr><td>{{ p.label }}</td><td>{{ p.value_str() }} nm</td></tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
+        </details>
         {% endif %}
       </section>
 
@@ -111,11 +155,26 @@
             <div class="chart-axis"><span>{{ messages.first_label }}</span><span>messages</span><span>{{ messages.last_label }}</span></div>
           </div>
         </div>
+        <details class="chart-table">
+          <summary>Show as table</summary>
+          <div class="table-wrap">
+            <table>
+              <caption class="sr-only">Messages received per day</caption>
+              <thead><tr><th scope="col">Day</th><th scope="col">Messages</th></tr></thead>
+              <tbody>
+                {% for p in messages.points %}
+                <tr><td>{{ p.label }}</td><td>{{ p.value_str() }}</td></tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
+        </details>
         {% endif %}
       </section>
     </main>
 
     <footer>LOCAL LEDGER · SQLITE · NO CLOUD</footer>
   </div>
+  <div id="chart-tip" class="chart-tip" role="tooltip"></div>
 </body>
 </html>

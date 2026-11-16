@@ -11,6 +11,7 @@ use crate::Db;
 
 const HTMX: &[u8] = include_bytes!("../static/htmx.min.js");
 const APP_CSS: &[u8] = include_bytes!("../static/app.css");
+const APP_JS: &[u8] = include_bytes!("../static/app.js");
 
 pub fn router(db: Db) -> Router {
     Router::new()
@@ -32,6 +33,7 @@ pub fn router(db: Db) -> Router {
         .route("/api/stats", get(api_stats))
         .route("/htmx.min.js", get(htmx_js))
         .route("/app.css", get(app_css))
+        .route("/app.js", get(app_js))
         .with_state(db)
         // The fleet table and `/api/aircraft` are a few hundred KB of markup.
         .layer(tower_http::compression::CompressionLayer::new())
@@ -502,6 +504,8 @@ struct ActivityTemplate {
     heatmap: stats::Heatmap,
     /// Hour labels for the heatmap header; empty strings keep the grid aligned.
     hours: Vec<String>,
+    /// Every hour, for the table view — the grid header only labels every third.
+    hours_full: Vec<String>,
     range: stats::LineChart,
     messages: stats::LineChart,
     tar1090: String,
@@ -515,10 +519,12 @@ async fn activity_page(State(db): State<Db>, headers: HeaderMap) -> Result<Html<
     let hours = (0..24)
         .map(|h| if h % 3 == 0 { format!("{h:02}") } else { String::new() })
         .collect();
+    let hours_full = (0..24).map(|h| format!("{h:02}")).collect();
     Ok(Html(
         ActivityTemplate {
             heatmap,
             hours,
+            hours_full,
             range: stats::LineChart::build(&range),
             messages: stats::LineChart::build(&messages),
             tar1090: tar1090_base(&headers),
@@ -691,6 +697,16 @@ async fn app_css() -> impl IntoResponse {
     (
         [(header::CONTENT_TYPE, "text/css"), (header::CACHE_CONTROL, "no-cache")],
         APP_CSS,
+    )
+}
+
+async fn app_js() -> impl IntoResponse {
+    (
+        [
+            (header::CONTENT_TYPE, "text/javascript"),
+            (header::CACHE_CONTROL, "no-cache"),
+        ],
+        APP_JS,
     )
 }
 

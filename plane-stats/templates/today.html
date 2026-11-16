@@ -6,6 +6,7 @@
   <meta name="theme-color" content="#060a15">
   <title>Today · plane-stats</title>
   <link rel="stylesheet" href="/app.css?v=2">
+  <script src="/app.js" defer></script>
 </head>
 <body>
   <a class="skip" href="#main">Skip to content</a>
@@ -39,26 +40,28 @@
     <main id="main">
       <section class="glass panel" aria-label="Today at a glance">
         <h2>At a glance</h2>
-        <div class="cards">
-          <div class="card">
-            <div class="num">{{ summary.unique }}</div>
-            <div class="sub">unique aircraft</div>
-            <div class="who">{{ summary.sightings }} polls seen</div>
-          </div>
-          <div class="card">
-            <div class="num">{{ summary.new }}</div>
-            <div class="sub">new to me</div>
-            <div class="who">first time ever seen today</div>
-          </div>
-          <div class="card">
-            <div class="num">{% if let Some(v) = summary.peak_airborne %}{{ v }}{% else %}-{% endif %}</div>
-            <div class="sub">peak overhead</div>
-            <div class="who">across {{ summary.polls }} polls</div>
-          </div>
-          <div class="card">
-            <div class="num">{{ summary.messages }}</div>
-            <div class="sub">messages</div>
-            <div class="who">{% if summary.first_ts.is_some() %}{{ summary.span_str() }} local{% else %}no polls yet{% endif %}</div>
+        <div class="card-group">
+          <div class="cards">
+            <div class="card">
+              <div class="num">{{ summary.unique }}</div>
+              <div class="sub">unique aircraft</div>
+              <div class="who">{{ summary.sightings }} polls seen</div>
+            </div>
+            <div class="card">
+              <div class="num">{{ summary.new }}</div>
+              <div class="sub">new to me</div>
+              <div class="who">first time ever seen today</div>
+            </div>
+            <div class="card">
+              <div class="num">{% if let Some(v) = summary.peak_airborne %}{{ v }}{% else %}-{% endif %}</div>
+              <div class="sub">peak overhead</div>
+              <div class="who">across {{ summary.polls }} polls</div>
+            </div>
+            <div class="card">
+              <div class="num">{{ summary.messages }}</div>
+              <div class="sub">messages</div>
+              <div class="who">{% if summary.first_ts.is_some() %}{{ summary.span_str() }} local{% else %}no polls yet{% endif %}</div>
+            </div>
           </div>
         </div>
       </section>
@@ -143,33 +146,6 @@
 
     <footer>LOCAL LEDGER · SQLITE · NO CLOUD</footer>
   </div>
-  <div id="hist-tip" class="hist-tip" role="tooltip"></div>
-  <script>
-    (() => {
-      const tip = document.getElementById("hist-tip");
-      if (!tip) return;
-      const hide = () => tip.classList.remove("show");
-      const show = (col) => {
-        tip.textContent = col.dataset.tip;
-        tip.classList.add("show");
-        const r = col.getBoundingClientRect();
-        const bar = col.querySelector(".hist-bar");
-        const top = bar ? bar.getBoundingClientRect().top : r.top;
-        const half = tip.offsetWidth / 2;
-        const x = Math.min(Math.max(r.left + r.width / 2, half + 8), window.innerWidth - half - 8);
-        tip.style.left = `${x}px`;
-        tip.style.top = `${top - 6}px`;
-      };
-      for (const col of document.querySelectorAll(".hist-col")) {
-        col.addEventListener("pointerenter", (e) => { if (e.pointerType === "mouse") show(col); });
-        col.addEventListener("pointerleave", (e) => { if (e.pointerType === "mouse") hide(); });
-        col.addEventListener("focus", () => show(col));
-        col.addEventListener("blur", hide);
-        col.addEventListener("pointerdown", () => show(col));
-      }
-      window.addEventListener("scroll", hide, { passive: true });
-      window.addEventListener("resize", hide);
-    })();
-  </script>
+  <div id="chart-tip" class="chart-tip" role="tooltip"></div>
 </body>
 </html>
