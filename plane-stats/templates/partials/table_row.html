@@ -1,6 +1,6 @@
     <tr>
-      <td><a href="/aircraft/{{ a.hex }}">{{ a.hex }}</a></td>
-      <td>{{ a.last_flight.as_deref().unwrap_or("") }}</td>
+      <td class="hex"><a href="/aircraft/{{ a.hex }}">{{ a.hex }}</a></td>
+      <td class="col-callsign">{% if let Some(v) = a.last_flight %}{{ v }}{% else %}-{% endif %}</td>
       <td>{% if let Some(v) = a.registration %}{{ v }}{% else %}-{% endif %}</td>
       <td class="mono">{% if let Some(v) = a.typecode %}{{ v }}{% else %}-{% endif %}</td>
       <td>{% if let Some(v) = a.last_squawk %}{{ v }}{% else %}-{% endif %}</td>

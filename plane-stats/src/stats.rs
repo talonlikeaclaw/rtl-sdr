@@ -340,6 +340,55 @@ impl FleetSql {
 }
 
 impl FleetFilter {
+    /// Human labels for the filters currently on, for the summary line. A view
+    /// that silently returns an empty table is the failure this prevents.
+    pub fn active_labels(&self) -> Vec<String> {
+        let mut out = Vec::new();
+        if !self.q.trim().is_empty() {
+            out.push(format!("\u{201c}{}\u{201d}", self.q.trim()));
+        }
+        if self.mil {
+            out.push("Military".into());
+        }
+        if self.interesting {
+            out.push("Interesting".into());
+        }
+        if self.privacy {
+            out.push("Privacy".into());
+        }
+        if self.emergency {
+            out.push("Emergency history".into());
+        }
+        if self.today {
+            out.push("Heard today".into());
+        }
+        if self.new7 {
+            out.push("New this week".into());
+        }
+        if self.dormant {
+            out.push("Not seen this week".into());
+        }
+        if self.regular {
+            out.push("Regulars".into());
+        }
+        match self.cat.as_str() {
+            "fixed" => out.push("Fixed wing".into()),
+            "heli" => out.push("Helicopter".into()),
+            _ => {}
+        }
+        if let Some(v) = self.alt_min {
+            out.push(format!("max alt \u{2265} {v} ft"));
+        }
+        if let Some(v) = self.alt_max {
+            out.push(format!("max alt \u{2264} {v} ft"));
+        }
+        out
+    }
+
+    pub fn is_active(&self) -> bool {
+        !self.active_labels().is_empty()
+    }
+
     fn to_sql(&self, now: f64) -> FleetSql {
         let mut clauses: Vec<&'static str> = Vec::new();
         let mut params: Vec<(&'static str, Value)> = Vec::new();
@@ -416,8 +465,12 @@ pub fn aircraft_sorted(
     let mut f = filter.to_sql(now);
     f.params.push((":limit", Value::Integer(i64::from(limit))));
     f.params.push((":offset", Value::Integer(i64::from(offset))));
+    // NULL and empty values sort last in both directions: a callsign sort that
+    // opens on a screen of blanks reads as a broken control, not a sort.
     let sql = format!(
-        "SELECT {COLS} {FROM} {} ORDER BY {col} {dir}, a.hex ASC LIMIT :limit OFFSET :offset",
+        "SELECT {COLS} {FROM} {}
+         ORDER BY ({col} IS NULL), ({col} = ''), {col} {dir}, a.hex ASC
+         LIMIT :limit OFFSET :offset",
         f.where_clause
     );
     let mut stmt = conn.prepare(&sql)?;
@@ -442,10 +495,138 @@ pub fn aircraft_count(db: &Db, filter: &FleetFilter, now: f64) -> rusqlite::Resu
 pub fn recent_arrivals(db: &Db) -> rusqlite::Result<Vec<AircraftRow>> {
     let conn = crate::db_lock(db);
     let mut stmt = conn.prepare(&format!(
-        "SELECT {COLS} {FROM} ORDER BY a.first_seen DESC LIMIT 10"
+        "SELECT {COLS} {FROM} ORDER BY a.first_seen DESC LIMIT 5"
     ))?;
     let rows = stmt.query_map([], row_to_aircraft)?;
     rows.collect()
+}
+
+/// Seconds since the poller last wrote a row, or `None` if it never has.
+pub fn last_poll_age(db: &Db, now: f64) -> rusqlite::Result<Option<f64>> {
+    let conn = crate::db_lock(db);
+    let last: Option<f64> = conn.query_row("SELECT MAX(ts) FROM poll_log", [], |r| r.get(0))?;
+    Ok(last.map(|ts| (now - ts).max(0.0)))
+}
+
+/// Whether the receiver is still answering. The dashboard's whole liveness
+/// claim hangs off this, so it is a first-class datum, not a decoration.
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct PollerHealth {
+    pub age_secs: Option<f64>,
+}
+
+/// A poll older than this means the receiver has stopped answering.
+const POLL_STALE_SECS: f64 = 30.0;
+/// Beyond this the poller is presumed dead rather than briefly late.
+const POLL_DOWN_SECS: f64 = 300.0;
+
+impl PollerHealth {
+    pub fn new(age_secs: Option<f64>) -> Self {
+        Self { age_secs }
+    }
+
+    /// `live` / `stale` / `down` — the class the pill carries.
+    pub fn state(&self) -> &'static str {
+        match self.age_secs {
+            None => "down",
+            Some(a) if a < POLL_STALE_SECS => "live",
+            Some(a) if a < POLL_DOWN_SECS => "stale",
+            _ => "down",
+        }
+    }
+
+    pub fn is_live(&self) -> bool {
+        self.state() == "live"
+    }
+
+    fn age_phrase(&self) -> String {
+        match self.age_secs {
+            None => "never".to_string(),
+            Some(a) => {
+                let s = a.round() as i64;
+                if s < 60 {
+                    format!("{s} s ago")
+                } else if s < 3600 {
+                    format!("{} m ago", s / 60)
+                } else {
+                    format!("{} h ago", s / 3600)
+                }
+            }
+        }
+    }
+
+    /// The pill's visible text.
+    pub fn label(&self) -> String {
+        match self.state() {
+            "live" => format!("live · {}", self.age_phrase()),
+            "stale" => format!("stalled · {}", self.age_phrase()),
+            _ => format!("poller down · {}", self.age_phrase()),
+        }
+    }
+
+    /// Announced once when the state leaves `live`. `None` while healthy, so
+    /// the alert region is absent and nothing is re-read on every tick.
+    pub fn alert(&self) -> Option<String> {
+        match self.state() {
+            "live" => None,
+            "stale" => Some(format!("Receiver stalled — last poll {}", self.age_phrase())),
+            _ => Some(format!("Poller down — last poll {}", self.age_phrase())),
+        }
+    }
+}
+
+/// Per-flag totals, so a filter chip can say how many rows it would match
+/// instead of silently returning an empty table.
+#[derive(Debug, Default, Clone, serde::Serialize)]
+pub struct FilterCounts {
+    pub total: i64,
+    pub mil: i64,
+    pub interesting: i64,
+    pub privacy: i64,
+    pub emergency: i64,
+    pub today: i64,
+    pub new7: i64,
+    pub dormant: i64,
+    pub regular: i64,
+    pub fixed: i64,
+    pub heli: i64,
+}
+
+pub fn filter_counts(db: &Db, now: f64) -> rusqlite::Result<FilterCounts> {
+    let conn = crate::db_lock(db);
+    let today_start = local_day_start(now);
+    let new7_start = now - 7.0 * 86_400.0;
+    let dormant_start = now - DORMANT_SECS;
+    conn.query_row(
+        "SELECT COUNT(*),
+                COALESCE(SUM((db_flags & 1) = 1), 0),
+                COALESCE(SUM((db_flags & 2) = 2), 0),
+                COALESCE(SUM((db_flags & 12) != 0), 0),
+                COALESCE(SUM(EXISTS (SELECT 1 FROM emergency_log el WHERE el.hex = aircraft.hex)), 0),
+                COALESCE(SUM(last_seen >= ?1), 0),
+                COALESCE(SUM(first_seen >= ?2), 0),
+                COALESCE(SUM(last_seen < ?3), 0),
+                COALESCE(SUM((SELECT COUNT(*) FROM visits v WHERE v.hex = aircraft.hex) >= ?4), 0),
+                COALESCE(SUM(last_category IN ('A1','A2','A3','A4','A5','A6')), 0),
+                COALESCE(SUM(last_category = 'A7'), 0)
+         FROM aircraft",
+        params![today_start, new7_start, dormant_start, REGULAR_VISITS],
+        |r| {
+            Ok(FilterCounts {
+                total: r.get(0)?,
+                mil: r.get(1)?,
+                interesting: r.get(2)?,
+                privacy: r.get(3)?,
+                emergency: r.get(4)?,
+                today: r.get(5)?,
+                new7: r.get(6)?,
+                dormant: r.get(7)?,
+                regular: r.get(8)?,
+                fixed: r.get(9)?,
+                heli: r.get(10)?,
+            })
+        },
+    )
 }
 
 /// Aircraft still on the tar1090 map, nearest first (unpositioned last).
@@ -1410,4 +1591,30 @@ pub fn enrichment_for(db: &Db, hex: &str) -> rusqlite::Result<Option<Enrichment>
         },
     )
     .optional()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::PollerHealth;
+
+    /// The pill's three states are what tells the operator the receiver died;
+    /// the boundaries are the whole contract.
+    #[test]
+    fn poller_health_states() {
+        assert_eq!(PollerHealth::new(None).state(), "down");
+        assert_eq!(PollerHealth::new(Some(0.0)).state(), "live");
+        assert_eq!(PollerHealth::new(Some(29.9)).state(), "live");
+        assert_eq!(PollerHealth::new(Some(30.0)).state(), "stale");
+        assert_eq!(PollerHealth::new(Some(299.0)).state(), "stale");
+        assert_eq!(PollerHealth::new(Some(300.0)).state(), "down");
+        assert_eq!(PollerHealth::new(Some(7200.0)).state(), "down");
+    }
+
+    #[test]
+    fn poller_health_only_alerts_when_not_live() {
+        assert_eq!(PollerHealth::new(Some(4.0)).alert(), None);
+        assert!(PollerHealth::new(Some(90.0)).alert().unwrap().starts_with("Receiver stalled"));
+        assert!(PollerHealth::new(Some(7200.0)).alert().unwrap().starts_with("Poller down"));
+        assert!(PollerHealth::new(None).alert().is_some());
+    }
 }

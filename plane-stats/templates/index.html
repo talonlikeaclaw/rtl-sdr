@@ -9,6 +9,8 @@
   <script src="/htmx.min.js"></script>
 </head>
 <body>
+  <a class="skip" href="#main">Skip to content</a>
+
   <div class="bg" aria-hidden="true">
     <span class="orb orb-a"></span>
     <span class="orb orb-b"></span>
@@ -32,23 +34,32 @@
         <a class="pill" href="/today">Today</a>
         <a class="pill" href="/activity">Activity</a>
         <a class="pill" href="{{ tar1090 }}/" target="_blank" rel="noopener">Open live map</a>
-        <span class="pill"><span class="wave" aria-hidden="true"><span></span><span></span><span></span><span></span></span>live · refreshes every 10&nbsp;s</span>
+        <span class="pill status {{ poller.state() }}" title="Age of the most recent poll">
+          <span class="dot" aria-hidden="true"></span>
+          {% if poller.is_live() %}<span class="wave" aria-hidden="true"><span></span><span></span><span></span><span></span></span>{% endif %}
+          {{ poller.label() }}
+        </span>
       </div>
     </header>
 
-    <main>
-      <section class="glass panel" aria-label="Summary">
-        <div id="cards" hx-get="/partials/cards" hx-trigger="every 10s">
-          {% include "partials/cards.html" %}
-        </div>
-      </section>
+    {% if let Some(alert) = poller.alert() %}
+    <p class="sr-only" role="alert">{{ alert }}</p>
+    {% endif %}
 
+    <main id="main">
       <section class="glass panel" aria-label="Overhead now">
         <h2>Overhead now</h2>
         <div class="table-wrap live-wrap">
           <div id="live" hx-get="/partials/live" hx-trigger="load, every 5s [document.visibilityState === 'visible']">
             {% include "partials/live.html" %}
           </div>
+        </div>
+      </section>
+
+      <section class="glass panel" aria-label="Summary">
+        <h2>Summary</h2>
+        <div id="cards" hx-get="/partials/cards" hx-trigger="every 10s [document.visibilityState === 'visible']">
+          {% include "partials/cards.html" %}
         </div>
       </section>
 
@@ -61,88 +72,88 @@
                  hx-get="/partials/table" hx-trigger="input changed delay:400ms, search"
                  hx-target="#fleet" hx-include="#fleet-controls, #fleet-sort, #fleet-dir" aria-label="Search fleet">
           <div class="filter-row" role="group" aria-label="Flag filters">
-            <span class="filter-label" aria-hidden="true">Flags</span>
+            <span class="filter-label">Flags</span>
             <div class="chips">
               <input type="checkbox" id="f-mil" name="mil" value="1" class="chip-toggle"
                      {% if filter.mil %}checked{% endif %}
                      hx-get="/partials/table" hx-trigger="change" hx-target="#fleet"
                      hx-include="#fleet-controls, #fleet-sort, #fleet-dir">
-              <label class="chip" for="f-mil">Military</label>
+              <label class="chip" for="f-mil">Military<span class="chip-n">{{ counts.mil }}</span></label>
 
               <input type="checkbox" id="f-int" name="interesting" value="1" class="chip-toggle"
                      {% if filter.interesting %}checked{% endif %}
                      hx-get="/partials/table" hx-trigger="change" hx-target="#fleet"
                      hx-include="#fleet-controls, #fleet-sort, #fleet-dir">
-              <label class="chip" for="f-int" title="Flagged interesting by tar1090">Interesting</label>
+              <label class="chip" for="f-int" title="Flagged interesting by tar1090">Interesting<span class="chip-n">{{ counts.interesting }}</span></label>
 
               <input type="checkbox" id="f-priv" name="privacy" value="1" class="chip-toggle"
                      {% if filter.privacy %}checked{% endif %}
                      hx-get="/partials/table" hx-trigger="change" hx-target="#fleet"
                      hx-include="#fleet-controls, #fleet-sort, #fleet-dir">
-              <label class="chip" for="f-priv" title="PIA or LADD privacy-requested aircraft">Privacy (PIA/LADD)</label>
+              <label class="chip" for="f-priv" title="PIA or LADD privacy-requested aircraft">Privacy (PIA/LADD)<span class="chip-n">{{ counts.privacy }}</span></label>
 
               <input type="checkbox" id="f-emerg" name="emergency" value="1" class="chip-toggle"
                      {% if filter.emergency %}checked{% endif %}
                      hx-get="/partials/table" hx-trigger="change" hx-target="#fleet"
                      hx-include="#fleet-controls, #fleet-sort, #fleet-dir">
-              <label class="chip" for="f-emerg" title="Ever logged an emergency squawk">Emergency history</label>
+              <label class="chip" for="f-emerg" title="Ever logged an emergency squawk">Emergency history<span class="chip-n">{{ counts.emergency }}</span></label>
             </div>
           </div>
 
           <div class="filter-row" role="group" aria-label="Recency filters">
-            <span class="filter-label" aria-hidden="true">Recency</span>
+            <span class="filter-label">Recency</span>
             <div class="chips">
               <input type="checkbox" id="f-today" name="today" value="1" class="chip-toggle"
                      {% if filter.today %}checked{% endif %}
                      hx-get="/partials/table" hx-trigger="change" hx-target="#fleet"
                      hx-include="#fleet-controls, #fleet-sort, #fleet-dir">
-              <label class="chip" for="f-today">Heard today</label>
+              <label class="chip" for="f-today">Heard today<span class="chip-n">{{ counts.today }}</span></label>
 
               <input type="checkbox" id="f-new7" name="new7" value="1" class="chip-toggle"
                      {% if filter.new7 %}checked{% endif %}
                      hx-get="/partials/table" hx-trigger="change" hx-target="#fleet"
                      hx-include="#fleet-controls, #fleet-sort, #fleet-dir">
-              <label class="chip" for="f-new7">New this week</label>
+              <label class="chip" for="f-new7">New this week<span class="chip-n">{{ counts.new7 }}</span></label>
 
               <input type="checkbox" id="f-dormant" name="dormant" value="1" class="chip-toggle"
                      {% if filter.dormant %}checked{% endif %}
                      hx-get="/partials/table" hx-trigger="change" hx-target="#fleet"
                      hx-include="#fleet-controls, #fleet-sort, #fleet-dir">
-              <label class="chip" for="f-dormant" title="Last seen more than 7 days ago">Not seen this week</label>
+              <label class="chip" for="f-dormant" title="Last seen more than 7 days ago">Not seen this week<span class="chip-n">{{ counts.dormant }}</span></label>
 
               <input type="checkbox" id="f-regular" name="regular" value="1" class="chip-toggle"
                      {% if filter.regular %}checked{% endif %}
                      hx-get="/partials/table" hx-trigger="change" hx-target="#fleet"
                      hx-include="#fleet-controls, #fleet-sort, #fleet-dir">
-              <label class="chip" for="f-regular" title="Seen on 5 or more separate visits">Regulars</label>
+              <label class="chip" for="f-regular" title="Seen on 5 or more separate visits">Regulars<span class="chip-n">{{ counts.regular }}</span></label>
             </div>
           </div>
 
           <div class="filter-row" role="group" aria-label="Type filters">
-            <span class="filter-label" aria-hidden="true">Type</span>
+            <span class="filter-label">Type</span>
             <div class="chips">
               <input type="radio" id="f-cat-any" name="cat" value="" class="chip-toggle"
                      {% if filter.cat.is_empty() %}checked{% endif %}
                      hx-get="/partials/table" hx-trigger="change" hx-target="#fleet"
                      hx-include="#fleet-controls, #fleet-sort, #fleet-dir">
-              <label class="chip" for="f-cat-any">Any type</label>
+              <label class="chip" for="f-cat-any">Any type<span class="chip-n">{{ counts.total }}</span></label>
 
               <input type="radio" id="f-cat-fixed" name="cat" value="fixed" class="chip-toggle"
                      {% if filter.cat == "fixed" %}checked{% endif %}
                      hx-get="/partials/table" hx-trigger="change" hx-target="#fleet"
                      hx-include="#fleet-controls, #fleet-sort, #fleet-dir">
-              <label class="chip" for="f-cat-fixed">Fixed wing</label>
+              <label class="chip" for="f-cat-fixed">Fixed wing<span class="chip-n">{{ counts.fixed }}</span></label>
 
               <input type="radio" id="f-cat-heli" name="cat" value="heli" class="chip-toggle"
                      {% if filter.cat == "heli" %}checked{% endif %}
                      hx-get="/partials/table" hx-trigger="change" hx-target="#fleet"
                      hx-include="#fleet-controls, #fleet-sort, #fleet-dir">
-              <label class="chip" for="f-cat-heli">Helicopter</label>
+              <label class="chip" for="f-cat-heli">Helicopter<span class="chip-n">{{ counts.heli }}</span></label>
             </div>
           </div>
 
           <div class="filter-row" role="group" aria-label="Altitude filters">
-            <span class="filter-label" aria-hidden="true">Max altitude</span>
+            <span class="filter-label">Max altitude</span>
             <div class="chips">
               <label class="alt-field">≥
                 <input type="number" name="alt_min" min="0" step="100" inputmode="numeric"
@@ -175,13 +186,21 @@
         <h2>Recent new arrivals</h2>
         <div class="table-wrap">
           <table>
+            <caption class="sr-only">Aircraft heard for the first time, most recent first</caption>
             <thead>
-              <tr><th>Hex</th><th>Callsign</th><th>First seen</th></tr>
+              <tr><th scope="col">Hex</th><th scope="col">Callsign</th><th scope="col">First seen</th></tr>
             </thead>
             <tbody>
               {% for a in recent %}
-              <tr><td>{{ a.hex }}</td><td>{{ a.last_flight.as_deref().unwrap_or("") }}</td><td>{{ a.first_seen_str() }}</td></tr>
+              <tr>
+                <td class="hex"><a href="/aircraft/{{ a.hex }}">{{ a.hex }}</a></td>
+                <td>{% if let Some(v) = a.last_flight %}{{ v }}{% else %}-{% endif %}</td>
+                <td>{{ a.first_seen_str() }}</td>
+              </tr>
               {% endfor %}
+              {% if recent.is_empty() %}
+              <tr><td colspan="3">No aircraft recorded yet.</td></tr>
+              {% endif %}
             </tbody>
           </table>
         </div>
@@ -199,5 +218,21 @@
 
     <footer>LOCAL LEDGER · SQLITE · NO CLOUD</footer>
   </div>
+  <script>
+    // Swapping #fleet throws away the focused sort button. Put focus back on
+    // the column the user just sorted, or keyboard sorting loses its place.
+    let pendingSort = null;
+    document.body.addEventListener("htmx:beforeRequest", (e) => {
+      const el = e.detail.elt;
+      pendingSort = el.classList && el.classList.contains("sort") ? el.textContent.trim() : null;
+    });
+    document.body.addEventListener("htmx:afterSwap", (e) => {
+      if (e.detail.target.id !== "fleet" || !pendingSort) return;
+      const label = pendingSort;
+      pendingSort = null;
+      const btn = [...document.querySelectorAll("#fleet th .sort")].find((b) => b.textContent.trim() === label);
+      if (btn) btn.focus();
+    });
+  </script>
 </body>
 </html>

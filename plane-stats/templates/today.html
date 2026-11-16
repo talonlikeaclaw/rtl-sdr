@@ -8,6 +8,8 @@
   <link rel="stylesheet" href="/app.css?v=2">
 </head>
 <body>
+  <a class="skip" href="#main">Skip to content</a>
+
   <div class="bg" aria-hidden="true">
     <span class="orb orb-a"></span>
     <span class="orb orb-b"></span>
@@ -34,7 +36,7 @@
       </div>
     </header>
 
-    <main>
+    <main id="main">
       <section class="glass panel" aria-label="Today at a glance">
         <h2>At a glance</h2>
         <div class="cards">
@@ -65,8 +67,9 @@
         <h2>Records today</h2>
         <div class="table-wrap">
           <table>
+            <caption class="sr-only">Today's records against the best prior day</caption>
             <thead>
-              <tr><th>Metric</th><th>Today</th><th>Previous best</th><th>Holder</th><th>Status</th></tr>
+              <tr><th scope="col">Metric</th><th scope="col">Today</th><th scope="col">Previous best</th><th scope="col">Holder</th><th scope="col">Status</th></tr>
             </thead>
             <tbody>
               {% for r in records %}
@@ -115,14 +118,15 @@
         <h2>New to me today</h2>
         <div class="table-wrap">
           <table>
+            <caption class="sr-only">Aircraft heard for the first time today</caption>
             <thead>
-              <tr><th>Hex</th><th>Callsign</th><th>Registration</th><th>Type</th><th>First seen</th></tr>
+              <tr><th scope="col">Hex</th><th scope="col">Callsign</th><th scope="col">Registration</th><th scope="col">Type</th><th scope="col">First seen</th></tr>
             </thead>
             <tbody>
               {% for a in new %}
               <tr>
-                <td><a href="/aircraft/{{ a.hex }}">{{ a.hex }}</a></td>
-                <td>{{ a.last_flight.as_deref().unwrap_or("") }}</td>
+                <td class="hex"><a href="/aircraft/{{ a.hex }}">{{ a.hex }}</a></td>
+                <td>{% if let Some(v) = a.last_flight %}{{ v }}{% else %}-{% endif %}</td>
                 <td>{% if let Some(v) = a.registration %}{{ v }}{% else %}-{% endif %}</td>
                 <td>{% if let Some(v) = a.typecode %}{{ v }}{% else %}-{% endif %}</td>
                 <td>{{ a.first_seen_str() }}</td>

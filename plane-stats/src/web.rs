@@ -92,6 +92,8 @@ struct IndexTemplate {
     dir: String,
     q: String,
     filter: stats::FleetFilter,
+    counts: stats::FilterCounts,
+    poller: stats::PollerHealth,
     tar1090: String,
     now: f64,
     rx: Option<(f64, f64)>,
@@ -151,6 +153,7 @@ struct FleetView {
     sort: String,
     dir: String,
     filter: stats::FleetFilter,
+    counts: stats::FilterCounts,
 }
 
 fn fleet_view(db: &Db, q: &SortParams, now: f64) -> Result<FleetView, AppError> {
@@ -171,7 +174,8 @@ fn fleet_view(db: &Db, q: &SortParams, now: f64) -> Result<FleetView, AppError> 
         (nav.page - 1) * stats::PAGE_SIZE,
         now,
     )?;
-    Ok(FleetView { nav, rows, sort, dir, filter })
+    let counts = stats::filter_counts(db, now)?;
+    Ok(FleetView { nav, rows, sort, dir, filter, counts })
 }
 
 async fn index(
@@ -185,6 +189,7 @@ async fn index(
     let live = stats::live_aircraft(&db, now)?;
     let recent = stats::recent_arrivals(&db)?;
     let emergencies = stats::emergency_log(&db, 20)?;
+    let poller = stats::PollerHealth::new(stats::last_poll_age(&db, now)?);
     Ok(Html(
         IndexTemplate {
             stats: st,
@@ -196,6 +201,8 @@ async fn index(
             dir: view.dir,
             q: q.q.clone(),
             filter: view.filter,
+            counts: view.counts,
+            poller,
             tar1090: tar1090_base(&headers),
             now,
             rx: stats::rx_pos(),
@@ -272,12 +279,71 @@ fn parse_alt(v: &Option<String>) -> Option<i64> {
     v.as_deref().and_then(|s| s.trim().parse::<i64>().ok())
 }
 
+/// Percent-encode a query-string value. Only the free-text search can carry
+/// anything outside `[A-Za-z0-9._~-]`.
+fn enc(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    for b in s.bytes() {
+        match b {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
+                out.push(b as char);
+            }
+            b' ' => out.push('+'),
+            _ => out.push_str(&format!("%{b:02X}")),
+        }
+    }
+    out
+}
+
+/// The dashboard URL prefix that reproduces the current filter, ready for a
+/// `sort`/`dir`/`page` suffix. Ends in `&` when non-empty, so the templates can
+/// append without caring. Without this every sort, filter and page lived only
+/// in hidden inputs and the address bar never changed.
+fn fleet_query(filter: &stats::FleetFilter) -> String {
+    let mut parts: Vec<String> = Vec::new();
+    if !filter.q.trim().is_empty() {
+        parts.push(format!("q={}", enc(filter.q.trim())));
+    }
+    if !filter.cat.is_empty() {
+        parts.push(format!("cat={}", filter.cat));
+    }
+    for (name, on) in [
+        ("mil", filter.mil),
+        ("interesting", filter.interesting),
+        ("privacy", filter.privacy),
+        ("emergency", filter.emergency),
+        ("today", filter.today),
+        ("new7", filter.new7),
+        ("dormant", filter.dormant),
+        ("regular", filter.regular),
+    ] {
+        if on {
+            parts.push(format!("{name}=1"));
+        }
+    }
+    if let Some(v) = filter.alt_min {
+        parts.push(format!("alt_min={v}"));
+    }
+    if let Some(v) = filter.alt_max {
+        parts.push(format!("alt_max={v}"));
+    }
+    if parts.is_empty() { "/?".to_string() } else { format!("/?{}&", parts.join("&")) }
+}
+
+/// The address-bar URL for a fleet view. Returned to htmx as `HX-Push-Url` so
+/// sort, filter and page changes are bookmarkable and Back works, without the
+/// templates having to reconstruct the query string.
+fn canonical_url(filter: &stats::FleetFilter, sort: &str, dir: &str, page: u32) -> String {
+    format!("{}sort={sort}&dir={dir}&page={page}", fleet_query(filter))
+}
+
 #[derive(Template)]
 #[template(path = "partials/table.html")]
 struct TableTemplate {
     rows: Vec<AircraftRow>,
     sort: String,
     dir: String,
+    filter: stats::FleetFilter,
     tar1090: String,
     now: f64,
     page: u32,
@@ -293,26 +359,37 @@ async fn table_partial(
     State(db): State<Db>,
     Query(q): Query<SortParams>,
     headers: HeaderMap,
-) -> Result<Html<String>, AppError> {
+) -> Result<Response, AppError> {
     let now = now();
     let view = fleet_view(&db, &q, now)?;
-    Ok(Html(
-        TableTemplate {
-            rows: view.rows,
-            sort: view.sort,
-            dir: view.dir,
-            tar1090: tar1090_base(&headers),
-            now,
-            page: view.nav.page,
-            pages: view.nav.pages,
-            total: view.nav.total,
-            from_row: view.nav.from_row,
-            to_row: view.nav.to_row,
-            prev_page: view.nav.prev_page,
-            next_page: view.nav.next_page,
-        }
-        .render()?,
-    ))
+    let url = canonical_url(&view.filter, &view.sort, &view.dir, view.nav.page);
+    let body = TableTemplate {
+        rows: view.rows,
+        sort: view.sort,
+        dir: view.dir,
+        filter: view.filter,
+        tar1090: tar1090_base(&headers),
+        now,
+        page: view.nav.page,
+        pages: view.nav.pages,
+        total: view.nav.total,
+        from_row: view.nav.from_row,
+        to_row: view.nav.to_row,
+        prev_page: view.nav.prev_page,
+        next_page: view.nav.next_page,
+    }
+    .render()?;
+    let mut out = HeaderMap::new();
+    if let Ok(v) = axum::http::HeaderValue::from_str(&url) {
+        // Search-as-you-type fires every 400 ms; pushing each keystroke would
+        // bury the Back button. Replace for those, push for discrete actions.
+        let from_search = headers
+            .get("hx-trigger")
+            .and_then(|v| v.to_str().ok())
+            .is_some_and(|v| v.contains("fleet-search"));
+        out.insert(if from_search { "hx-replace-url" } else { "hx-push-url" }, v);
+    }
+    Ok((out, Html(body)).into_response())
 }
 
 /// Rows only, for the periodic refresh: swapping just the `<tbody>` keeps the

@@ -9,7 +9,7 @@ colors:
   instrument-text: "#e8edf4"
   data-text: "rgba(232, 237, 244, 0.85)"
   muted-slate: "rgba(203, 213, 225, 0.6)"
-  faint-slate: "rgba(148, 163, 184, 0.5)"
+  faint-slate: "#8b97a8"
   hairline-stroke: "rgba(255, 255, 255, 0.09)"
   glass-top: "rgba(255, 255, 255, 0.055)"
   glass-bottom: "rgba(255, 255, 255, 0.018)"
@@ -39,7 +39,7 @@ typography:
     fontWeight: 400
   label:
     fontFamily: "system-ui, -apple-system, Segoe UI, Roboto, sans-serif"
-    fontSize: "0.66rem"
+    fontSize: "0.72rem"
     fontWeight: 600
     letterSpacing: "0.11em"
   mono:
@@ -159,8 +159,9 @@ blue.
 - **Instrument Text** (#e8edf4): headings, card numerals (`#f1f5f9`), body copy.
 - **Data Text** (rgba(232, 237, 244, 0.85)): table cells.
 - **Muted Slate** (rgba(203, 213, 225, 0.6)): taglines, pill and chip labels, pager text.
-- **Faint Slate** (rgba(148, 163, 184, 0.5)): panel eyebrows, table headers, axis labels,
-  card sublabels.
+- **Faint Slate** (#8b97a8): panel eyebrows, table headers, axis labels, card sublabels.
+  Solid, not alpha — at 50% alpha it measured 2.7:1 on the panel and the label layer
+  failed WCAG AA. Solid it measures 6.0:1 on panels and 5.4:1 on cards.
 - **Hairline Stroke** (rgba(255, 255, 255, 0.09)): every border and divider.
 - **Glass Top / Glass Bottom** (rgba(255,255,255,0.055) → rgba(255,255,255,0.018)): the
   160° gradient that makes every surface.
@@ -196,7 +197,7 @@ tracking and case, not from a second family.
   2px Sky Blue Dim bar before it.
 - **Body** (400, 0.84rem): table content; 0.8rem for taglines and 0.78rem for pager and
   link cells.
-- **Label** (600, 0.66rem, 0.11em, uppercase, Faint Slate): table headers, card
+- **Label** (600, 0.72rem, 0.11em, uppercase, Faint Slate): table headers, card
   sublabels, filter-group labels.
 - **Mono** (400, 0.78rem): ICAO hex in the first table column, the footer line.
 
@@ -221,16 +222,25 @@ desktop and still fits a phone without a second layout.
   closed by the dashed runway line.
 - **Panels** stack with `1.25rem` between them and `1.2rem 1.35rem 1.35rem` internal
   padding.
+- **Page order** answers the product's two questions first: *Overhead now* → *Summary* →
+  *All-time fleet* → *Recent new arrivals* → *Emergency log*. The live table leads because
+  "what is in the sky" is the question the operator opens the page with.
 - **Card grid** is `repeat(auto-fit, minmax(10.5rem, 1fr))` with `0.75rem` gaps — the
-  count of stat cards changes the rows, never the column width.
+  count of stat cards changes the rows, never the column width. Cards are grouped under
+  `.group-label` eyebrows (*Right now* / *Ledger* / *Records*) with a hairline rule
+  running to the right edge, so thirteen tiles read as three ideas.
 - **Tables** live in a `.table-wrap` with `overflow-x: auto` and a 10px radius; the page
-  never scrolls horizontally, the table does.
+  never scrolls horizontally, the table does. A `local`/`scroll` background pair draws a
+  24px shadow on the right edge only while there is more table to reach.
+- **The fleet table pins its hex column** (`position: sticky; left: 0`) so the row keeps
+  its identity while the remaining twelve columns scroll under it on a phone.
 - **Live panel** is capped at `40vh` with `scrollbar-gutter: stable` and a sticky header,
   so a changing row count cannot push the rest of the page.
 - **Charts** use a two-column grid, `auto minmax(0, 1fr)`, with a 2.1rem y-axis column;
   the SVG scales to width with `height: auto`.
 - **Breakpoint:** one, at 640px — panel padding drops to `1rem 0.9rem 1.1rem`, card
-  minimum to 9rem, blur to 14px, and the `.meta` suffix in the tagline is hidden.
+  minimum to 9rem, blur to 14px, the `.meta` suffix in the tagline is hidden, filter
+  labels take a full line above their chips, and heat cells keep a 14px floor.
 
 ## Elevation & Depth
 
@@ -313,8 +323,35 @@ Text, 4.5% white bottom border, hover background 3.5% white. The first column is
 ### Inputs
 Search field: full width, 10px radius, glass gradient, 0.85rem, placeholder in Muted
 Slate, focus border in Sky Blue Dim (no ring, no glow). Altitude fields: 8px radius,
-5.2rem wide, right-sized numerals. **Known defect:** `input.search` does not inherit
-`font-family` and currently computes to Arial; it must be set to the system stack.
+5.2rem wide, right-sized numerals. Both take a 2px Sky Blue Dim halo on focus
+(`box-shadow`), because a 1px border shift alone is not a focus indicator.
+
+### Sortable headers
+A sortable `<th>` contains a real `<button class="sort">`, not a bare `hx-get` on the
+cell. The button inherits the header's type, carries the `▾`/`▴` glyph as a `::after` on
+`.active`, and takes a 2px Sky Blue Dim `:focus-visible` outline at 3px offset. The `<th>`
+carries `aria-sort="ascending|descending"` only when it is the active column. Sorting must
+never be mouse-only.
+
+### Status pill (poller health)
+The fourth header pill is the only element allowed to report the receiver's state. It
+carries `.status` plus one of `.live` / `.stale` / `.down`:
+
+| State | Trigger | Colour | Waveform |
+|---|---|---|---|
+| live | last poll < 30 s | Signal Mint dot | animating |
+| stale | < 5 min | Emergency Amber dot and border | frozen at 30% |
+| down | ≥ 5 min, or no polls | red dot and border | frozen at 30% |
+
+The visible label is `live · 4 s ago`. When the state is not `live`, the page also emits a
+single `role="alert"` sentence (`Receiver stalled — last poll 6 m ago`) and nothing
+otherwise, so a screen reader hears the transition once rather than every tick.
+
+### Filter summary
+When any filter is on, `partials/table.html` opens with a `.filter-summary` line —
+`Showing Military · Heard today` — and a `Clear all` link to `/`. Each chip also carries
+its matching row count in `.chip-n`, so a flag that matches nothing says `0` instead of
+returning an empty table with no explanation.
 
 ### Charts and heatmap (signature)
 The `/today` histogram is a 24-column CSS grid, 120px tall, with three hairline
@@ -340,12 +377,21 @@ Signal Mint on hover. All strokes use `vector-effect: non-scaling-stroke`.
   horizontally inside `.table-wrap` rather than the page.
 - **Do** respect `prefers-reduced-motion` — the stylesheet already collapses all
   animation and transition durations.
+- **Do** keep every functional label at 11px or larger and at 4.5:1 or better; the
+  detector's `undersized-ui-text` and `low-contrast` rules are the floor, not a style
+  opinion.
+- **Do** give every auto-updating region a `<caption class="sr-only">` and `scope="col"`
+  headers, and keep the skip link first in `<body>`.
 
 ### Don't:
-- **Don't** let a form control fall back to the UA font. `input.search` currently
-  computes to Arial because it does not inherit `font-family`; fix the control to the
-  system stack instead of adding a family.
-- **Don't** use Emergency Amber for anything but emergency squawks.
+- **Don't** leave a bare `<a>` unstyled: `color-scheme: dark` hands it Chrome's UA
+  lavender, which is not in the palette. The global `a { color: var(--accent) }` rule
+  exists for exactly this.
+- **Don't** use Emergency Amber for anything but emergency squawks. The poller's `stale`
+  state is the one exception, and it is a status, not an alarm.
+- **Don't** treat the emergency log as an alert. It is an archive of events that
+  happened — the owner's words — so it stays a normal panel at the bottom with no toast,
+  no badge and no assertive live region.
 - **Don't** add scale, translate or bounce transitions. State changes are colour, border
   and background only.
 - **Don't** fill a panel, card or row with Sky Blue; the selected chip is the single
