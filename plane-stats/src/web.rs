@@ -18,6 +18,8 @@ pub fn router(db: Db) -> Router {
         .route("/", get(index))
         .route("/today", get(today_page))
         .route("/activity", get(activity_page))
+        .route("/types", get(types_page))
+        .route("/type/:code", get(type_page))
         .route("/aircraft/:hex", get(aircraft_profile))
         .route("/api/aircraft/:hex", get(api_aircraft_hex))
         .route("/partials/table", get(table_partial))
@@ -30,6 +32,8 @@ pub fn router(db: Db) -> Router {
         .route("/api/live", get(api_live))
         .route("/api/today", get(api_today))
         .route("/api/activity", get(api_activity))
+        .route("/api/types", get(api_types))
+        .route("/api/type/:code", get(api_type))
         .route("/api/stats", get(api_stats))
         .route("/htmx.min.js", get(htmx_js))
         .route("/app.css", get(app_css))
@@ -558,6 +562,122 @@ async fn activity_page(State(db): State<Db>, headers: HeaderMap) -> Result<Html<
 
 async fn api_activity(State(db): State<Db>) -> Result<Json, ApiError> {
     Ok(Json(serde_json::to_value(stats::activity(&db, now())?)?))
+}
+
+#[derive(Deserialize, Default)]
+struct TypeParams {
+    #[serde(default)]
+    sort: String,
+}
+
+#[derive(Template)]
+#[template(path = "types.html")]
+struct TypesTemplate {
+    dex: Vec<stats::TypeDexRow>,
+    summary: stats::TypeDexSummary,
+    sort: String,
+    tar1090: String,
+}
+
+async fn types_page(
+    State(db): State<Db>,
+    Query(q): Query<TypeParams>,
+    headers: HeaderMap,
+) -> Result<Html<String>, AppError> {
+    let mut dex = stats::type_dex(&db)?;
+    let sort = match q.sort.as_str() {
+        "rarity" | "name" | "recent" => q.sort.clone(),
+        _ => "count".to_string(),
+    };
+    match sort.as_str() {
+        "rarity" => dex.sort_by(|a, b| {
+            a.rarity_rank()
+                .partial_cmp(&b.rarity_rank())
+                .unwrap_or(std::cmp::Ordering::Equal)
+                .then_with(|| b.caught.cmp(&a.caught))
+        }),
+        "name" => dex.sort_by_key(|d| d.display_name().to_lowercase()),
+        "recent" => dex.sort_by(|a, b| {
+            b.last_seen
+                .unwrap_or(0.0)
+                .partial_cmp(&a.last_seen.unwrap_or(0.0))
+                .unwrap_or(std::cmp::Ordering::Equal)
+        }),
+        _ => {}
+    }
+    Ok(Html(
+        TypesTemplate {
+            dex,
+            summary: stats::type_dex_summary(&db)?,
+            sort,
+            tar1090: tar1090_base(&headers),
+        }
+        .render()?,
+    ))
+}
+
+/// ICAO type designators are two to four alphanumeric characters. Reject
+/// anything else before it reaches the database or an error page.
+fn valid_type_code(code: &str) -> bool {
+    (2..=4).contains(&code.len()) && code.bytes().all(|b| b.is_ascii_alphanumeric())
+}
+
+#[derive(Template)]
+#[template(path = "type.html")]
+struct TypeTemplate {
+    detail: stats::TypeDetail,
+    tar1090: String,
+}
+
+async fn type_page(
+    State(db): State<Db>,
+    axum::extract::Path(code): axum::extract::Path<String>,
+    headers: HeaderMap,
+) -> Result<Response, AppError> {
+    let code = code.to_uppercase();
+    if !valid_type_code(&code) {
+        let body = ErrorTemplate {
+            title: "Not in the type dex",
+            message: "That is not an ICAO type designator.".to_string(),
+            detail: "A designator is two to four letters or digits, like B738, A20N or C172.",
+            tar1090: tar1090_base(&headers),
+        }
+        .render()?;
+        return Ok((StatusCode::NOT_FOUND, Html(body)).into_response());
+    }
+    let Some(detail) = stats::type_detail(&db, &code)? else {
+        let body = ErrorTemplate {
+            title: "Not in the type dex",
+            message: format!("No {code} has been heard yet."),
+            detail: "The dex only lists types the receiver has actually logged. Browse the fleet or the dex from the dashboard.",
+            tar1090: tar1090_base(&headers),
+        }
+        .render()?;
+        return Ok((StatusCode::NOT_FOUND, Html(body)).into_response());
+    };
+    Ok(Html(TypeTemplate { detail, tar1090: tar1090_base(&headers) }.render()?).into_response())
+}
+
+async fn api_types(State(db): State<Db>) -> Result<Json, ApiError> {
+    Ok(Json(serde_json::to_value(stats::type_dex(&db)?)?))
+}
+
+async fn api_type(
+    State(db): State<Db>,
+    axum::extract::Path(code): axum::extract::Path<String>,
+) -> Result<Json, ApiError> {
+    let code = code.to_uppercase();
+    if !valid_type_code(&code) {
+        return Err(ApiError(AppError::new(StatusCode::NOT_FOUND, "not an ICAO type designator")));
+    }
+    let Some(detail) = stats::type_detail(&db, &code)? else {
+        return Err(ApiError(AppError::new(StatusCode::NOT_FOUND, format!("unknown type {code}"))));
+    };
+    Ok(Json(serde_json::json!({
+        "type": detail.row,
+        "airframes": detail.airframes,
+        "operators": detail.operators,
+    })))
 }
 
 #[derive(Deserialize, Default)]

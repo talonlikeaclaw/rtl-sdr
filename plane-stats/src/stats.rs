@@ -1624,6 +1624,342 @@ pub fn enrichment_for(db: &Db, hex: &str) -> rusqlite::Result<Option<Enrichment>
     .optional()
 }
 
+/// One row of the type dex: a designator seen on the air, its ICAO Doc 8643
+/// identity, the cached Wikipedia profile, and the local catch stats.
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct TypeDexRow {
+    pub designator: String,
+    pub manufacturer: Option<String>,
+    pub model: Option<String>,
+    pub engine_type: Option<String>,
+    pub engine_count: Option<String>,
+    pub wtc: Option<String>,
+    pub category: Option<String>,
+    pub wiki_title: Option<String>,
+    pub wiki_extract: Option<String>,
+    pub wiki_image: Option<String>,
+    pub wiki_url: Option<String>,
+    pub first_flight: Option<String>,
+    pub total_produced: Option<String>,
+    pub wingspan_m: Option<String>,
+    pub caught: i64,
+    pub registered: i64,
+    pub first_seen: Option<f64>,
+    pub last_seen: Option<f64>,
+    pub sightings: i64,
+    pub max_alt_ft: Option<i64>,
+    pub max_gs_kts: Option<f64>,
+    pub max_range_nm: Option<f64>,
+}
+
+/// Doc 8643 manufacturer codes are upper case; "BOEING 737-800" shouts.
+pub(crate) fn title_case(s: &str) -> String {
+    s.split_whitespace()
+        .map(|word| {
+            let mut chars = word.chars();
+            match chars.next() {
+                Some(first) if word.chars().all(|c| !c.is_ascii_lowercase()) => {
+                    format!("{}{}", first.to_ascii_uppercase(), chars.as_str().to_ascii_lowercase())
+                }
+                _ => word.to_string(),
+            }
+        })
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+impl TypeDexRow {
+    // Accessors for the template's `if let Some(..)` patterns: matching a
+    // borrowed `Option<String>` by value would move out of the row.
+    pub fn image(&self) -> Option<&str> {
+        self.wiki_image.as_deref()
+    }
+    pub fn extract(&self) -> Option<&str> {
+        self.wiki_extract.as_deref()
+    }
+    pub fn wiki(&self) -> Option<&str> {
+        self.wiki_url.as_deref()
+    }
+    pub fn model_label(&self) -> String {
+        self.model.clone().filter(|m| !m.is_empty()).unwrap_or_else(|| "-".into())
+    }
+    pub fn first_flight_str(&self) -> Option<&str> {
+        self.first_flight.as_deref()
+    }
+    pub fn total_produced_str(&self) -> Option<&str> {
+        self.total_produced.as_deref()
+    }
+    pub fn wingspan_str(&self) -> Option<&str> {
+        self.wingspan_m.as_deref()
+    }
+    pub fn wtc_str(&self) -> Option<&str> {
+        self.wtc.as_deref()
+    }
+    pub fn display_name(&self) -> String {
+        // The Wikipedia title is the recognizable name ("Boeing 737 MAX",
+        // "Bombardier CRJ700 series"); Doc 8643's canonical model can be a
+        // military variant or an odd sub-type. Fall back to Doc 8643 when the
+        // profile has not been fetched yet.
+        if let Some(title) = self.wiki_title.as_deref().filter(|t| !t.trim().is_empty()) {
+            return title.to_string();
+        }
+        match (self.manufacturer.as_deref(), self.model.as_deref()) {
+            (Some(mf), Some(model)) if !mf.is_empty() && !model.is_empty() => {
+                format!("{} {model}", title_case(mf))
+            }
+            (_, Some(model)) if !model.is_empty() => model.to_string(),
+            _ => self.designator.clone(),
+        }
+    }
+    fn fmt_day(epoch: Option<f64>) -> String {
+        epoch
+            .and_then(|ts| chrono::DateTime::from_timestamp(ts as i64, 0))
+            .map(|dt| dt.with_timezone(&chrono::Local).format("%Y-%m-%d").to_string())
+            .unwrap_or_else(|| "-".into())
+    }
+    pub fn first_seen_str(&self) -> String {
+        Self::fmt_day(self.first_seen)
+    }
+    pub fn last_seen_str(&self) -> String {
+        Self::fmt_day(self.last_seen)
+    }
+    /// Bar width for the card. A type with one airframe out of 5,000 still
+    /// gets a visible sliver; a full bar means every registered airframe.
+    pub fn pct(&self) -> i64 {
+        if self.registered > 0 {
+            ((self.caught * 100) / self.registered).clamp(1, 100)
+        } else {
+            100
+        }
+    }
+    pub fn pct_str(&self) -> String {
+        if self.registered > 0 {
+            format!("{:.1}%", self.caught as f64 * 100.0 / self.registered as f64)
+        } else {
+            "-".into()
+        }
+    }
+    /// Caught / registered, used for the "rarest" sort.
+    pub fn rarity_rank(&self) -> f64 {
+        if self.registered > 0 {
+            self.caught as f64 / self.registered as f64
+        } else {
+            1.0
+        }
+    }
+    pub fn engine_str(&self) -> String {
+        match (self.engine_count.as_deref(), self.engine_type.as_deref()) {
+            (Some(count), Some(kind)) if !count.is_empty() && !kind.is_empty() => {
+                format!("{count} × {kind}")
+            }
+            (Some(count), _) if !count.is_empty() => count.to_string(),
+            (_, Some(kind)) if !kind.is_empty() => kind.to_string(),
+            _ => "-".into(),
+        }
+    }
+    pub fn category_str(&self) -> String {
+        match self.category.as_deref() {
+            Some("LandPlane") => "Land plane".into(),
+            Some("Helicopter") => "Helicopter".into(),
+            Some("Amphibian") => "Amphibian".into(),
+            Some(c) if !c.is_empty() => c.to_string(),
+            _ => "-".into(),
+        }
+    }
+}
+
+/// The dex query: every designator heard on the air, joined to its cached
+/// profile. The `registered` subquery is the rarity denominator — how many
+/// airframes of this type exist in the OpenSky database, not just overhead.
+const TYPE_DEX_SQL: &str = "WITH seen AS (
+       SELECT e.typecode AS designator,
+              COUNT(DISTINCT a.hex) AS caught,
+              MIN(a.first_seen) AS first_seen,
+              MAX(a.last_seen) AS last_seen,
+              SUM(a.sightings) AS sightings,
+              MAX(a.max_alt_ft) AS max_alt_ft,
+              MAX(a.max_gs_kts) AS max_gs_kts,
+              MAX(a.max_range_nm) AS max_range_nm
+       FROM aircraft a CROSS JOIN enrichment e ON e.icao24 = a.hex
+       WHERE e.typecode IS NOT NULL AND e.typecode <> ''
+       GROUP BY e.typecode
+     )
+     SELECT s.designator, s.caught, s.first_seen, s.last_seen, s.sightings,
+            s.max_alt_ft, s.max_gs_kts, s.max_range_nm,
+            t.manufacturer, t.model, t.engine_type, t.engine_count, t.wtc, t.category,
+            t.wiki_title, t.wiki_extract, t.wiki_image, t.wiki_url,
+            t.first_flight, t.total_produced, t.wingspan_m,
+            (SELECT COUNT(*) FROM enrichment e2 WHERE e2.typecode = s.designator) AS registered
+     FROM seen s LEFT JOIN aircraft_types t ON t.designator = s.designator
+     ORDER BY s.caught DESC, s.designator";
+
+fn row_to_type(r: &Row) -> rusqlite::Result<TypeDexRow> {
+    Ok(TypeDexRow {
+        designator: r.get(0)?,
+        caught: r.get(1)?,
+        first_seen: r.get(2)?,
+        last_seen: r.get(3)?,
+        sightings: r.get(4)?,
+        max_alt_ft: r.get(5)?,
+        max_gs_kts: r.get(6)?,
+        max_range_nm: r.get(7)?,
+        manufacturer: r.get(8)?,
+        model: r.get(9)?,
+        engine_type: r.get(10)?,
+        engine_count: r.get(11)?,
+        wtc: r.get(12)?,
+        category: r.get(13)?,
+        wiki_title: r.get(14)?,
+        wiki_extract: r.get(15)?,
+        wiki_image: r.get(16)?,
+        wiki_url: r.get(17)?,
+        first_flight: r.get(18)?,
+        total_produced: r.get(19)?,
+        wingspan_m: r.get(20)?,
+        registered: r.get(21)?,
+    })
+}
+
+pub fn type_dex(db: &Db) -> rusqlite::Result<Vec<TypeDexRow>> {
+    let conn = crate::db_lock(db);
+    let mut stmt = conn.prepare(TYPE_DEX_SQL)?;
+    let rows = stmt.query_map([], row_to_type)?;
+    rows.collect()
+}
+
+#[derive(Debug, serde::Serialize)]
+pub struct TypeAirframe {
+    pub hex: String,
+    pub registration: Option<String>,
+    pub operator: Option<String>,
+    pub owner: Option<String>,
+    pub first_seen: f64,
+    pub last_seen: f64,
+    pub sightings: i64,
+    pub max_alt_ft: Option<i64>,
+    pub max_gs_kts: Option<f64>,
+    pub max_range_nm: Option<f64>,
+}
+
+impl TypeAirframe {
+    fn fmt_ts(epoch: f64) -> String {
+        chrono::DateTime::from_timestamp(epoch as i64, 0)
+            .expect("valid ts")
+            .with_timezone(&chrono::Local)
+            .format("%Y-%m-%d %H:%M")
+            .to_string()
+    }
+    pub fn first_seen_str(&self) -> String {
+        Self::fmt_ts(self.first_seen)
+    }
+    pub fn last_seen_str(&self) -> String {
+        Self::fmt_ts(self.last_seen)
+    }
+    pub fn operator_str(&self) -> String {
+        self.operator
+            .as_deref()
+            .or(self.owner.as_deref())
+            .filter(|s| !s.is_empty())
+            .unwrap_or("-")
+            .to_string()
+    }
+}
+
+#[derive(Debug, serde::Serialize)]
+pub struct TypeOperator {
+    pub name: String,
+    pub count: i64,
+}
+
+#[derive(Debug, serde::Serialize)]
+pub struct TypeDetail {
+    pub row: TypeDexRow,
+    pub airframes: Vec<TypeAirframe>,
+    pub operators: Vec<TypeOperator>,
+}
+
+pub fn type_detail(db: &Db, code: &str) -> rusqlite::Result<Option<TypeDetail>> {
+    let Some(row) = type_dex(db)?.into_iter().find(|r| r.designator == code) else {
+        return Ok(None);
+    };
+    let conn = crate::db_lock(db);
+    let mut stmt = conn.prepare(
+        "SELECT a.hex, e.registration, e.operator, e.owner,
+                a.first_seen, a.last_seen, a.sightings,
+                a.max_alt_ft, a.max_gs_kts, a.max_range_nm
+         FROM aircraft a CROSS JOIN enrichment e ON e.icao24 = a.hex
+         WHERE e.typecode = ?1 ORDER BY a.last_seen DESC",
+    )?;
+    let airframes = stmt
+        .query_map(params![code], |r| {
+            Ok(TypeAirframe {
+                hex: r.get(0)?,
+                registration: r.get(1)?,
+                operator: r.get(2)?,
+                owner: r.get(3)?,
+                first_seen: r.get(4)?,
+                last_seen: r.get(5)?,
+                sightings: r.get(6)?,
+                max_alt_ft: r.get(7)?,
+                max_gs_kts: r.get(8)?,
+                max_range_nm: r.get(9)?,
+            })
+        })?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+    let mut stmt = conn.prepare(
+        "SELECT COALESCE(NULLIF(e.operator, ''), NULLIF(e.owner, '')) AS name,
+                COUNT(DISTINCT a.hex) AS n
+         FROM aircraft a CROSS JOIN enrichment e ON e.icao24 = a.hex
+         WHERE e.typecode = ?1
+           AND COALESCE(NULLIF(e.operator, ''), NULLIF(e.owner, '')) IS NOT NULL
+         GROUP BY 1 ORDER BY 2 DESC, 1 LIMIT 6",
+    )?;
+    let operators = stmt
+        .query_map(params![code], |r| Ok(TypeOperator { name: r.get(0)?, count: r.get(1)? }))?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+    Ok(Some(TypeDetail { row, airframes, operators }))
+}
+
+#[derive(Debug, serde::Serialize)]
+pub struct TypeDexSummary {
+    /// Distinct designators heard.
+    pub types: i64,
+    /// Distinct airframes heard.
+    pub airframes: i64,
+    /// Designators in the cached ICAO Doc 8643 table.
+    pub designators: i64,
+}
+
+impl TypeDexSummary {
+    /// Dex completion: caught types out of every ICAO designator. Small by
+    /// design — the point of the number is how much is still out there.
+    pub fn pct_str(&self) -> String {
+        if self.designators > 0 {
+            format!("{:.1}%", self.types as f64 * 100.0 / self.designators as f64)
+        } else {
+            "-".into()
+        }
+    }
+}
+
+pub fn type_dex_summary(db: &Db) -> rusqlite::Result<TypeDexSummary> {
+    let conn = crate::db_lock(db);
+    let types = conn.query_row(
+        "SELECT COUNT(DISTINCT e.typecode) FROM aircraft a
+         CROSS JOIN enrichment e ON e.icao24 = a.hex
+         WHERE e.typecode IS NOT NULL AND e.typecode <> ''",
+        [],
+        |r| r.get(0),
+    )?;
+    let airframes = conn.query_row("SELECT COUNT(*) FROM aircraft", [], |r| r.get(0))?;
+    let designators = conn.query_row(
+        "SELECT COUNT(*) FROM aircraft_types WHERE model IS NOT NULL AND model <> ''",
+        [],
+        |r| r.get(0),
+    )?;
+    Ok(TypeDexSummary { types, airframes, designators })
+}
+
 #[cfg(test)]
 mod tests {
     use super::PollerHealth;

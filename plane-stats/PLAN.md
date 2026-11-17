@@ -48,6 +48,12 @@ Built and working:
   cumulative counter, 30 days); `/activity` renders a CSS-grid heatmap and two
   inline SVG line charts, `/api/activity` returns the raw series. The busiest
   heatmap cell equals the "busiest hour" card by construction.
+- Type dex: `/types` card grid and `/type/:code` profile with a Wikipedia
+  photo + extract, ICAO Doc 8643 specs, Wikidata facts, and local catch stats
+  (caught / OpenSky-registered, first/last seen, records, airframes,
+  operators). `aircraft_types` + `type_wiki_map`; `types::run` refreshes Doc
+  8643 monthly, the Wikipedia designator map weekly, and profiles monthly in
+  batched requests. `/api/types`, `/api/type/:code`.
 
 Refresh model (60 s tbody-only tick, `hx-sync`, `poll_hour` rollup, cached
 `stats()`) is documented in `AGENTS.md` under "plane-stats status".
@@ -228,34 +234,64 @@ point per day; no mobile horizontal scroll.
 
 ---
 
-## Step 7 — "New to me" notifications
+## Step 7 — Aircraft type dex
 
-**Files:** new `static/live.js`, `web.rs` (serve it), `index.html`.
+**Goal:** a Pokédex for airframes: one card/page per ICAO type designator with
+a photo, a short history, specs, and your catch stats. Replaces the old
+notifications + polish steps (the squawk/operator polish can come back as a
+small follow-up).
 
-- Poll `/api/live` every 5 s; keep a `Set` + `localStorage.planeStatsSeen`.
-- Fire `Notification` for a new hex within `max_nm` / `max_alt`.
-- Header button requests permission (never auto-prompt).
-- Params `?notify=1&max_nm=15&max_alt=5000`; `?debugNotify=1` for testing.
+**Files:** new `src/types.rs`, `src/main.rs` (schema + boot task), `src/stats.rs`
+(type queries), `src/web.rs` (routes), new `templates/types.html`,
+`templates/type.html`, `static/app.css`, `templates/index.html`.
 
-**Verify:** `?debugNotify=1` → one notification per new hex; reload does not
-re-notify; denied permission leaves the page functional.
+**Data (free, no key):**
 
-**Commit:** `plane-stats: new-aircraft browser notifications`
+- **ICAO Doc 8643** — `POST https://doc8643.icao.int/External/AircraftTypes`
+  (empty body, ~1.6 MB, 7,261 rows / 2,614 designators): canonical
+  `Designator → ModelFullName, ManufacturerCode, EngineType, EngineCount, WTC,
+  AircraftDescription`. Fetch at boot into `aircraft_types`; skip when fresh
+  (stamp in `enrichment_meta`, like the CSV). Never fatal.
+- **Wikipedia** — the `List_of_aircraft_type_designators` wikitext gives a
+  curated `designator → article` map (237 codes, e.g. `B738 → Boeing 737 Next
+  Generation`). Codes it misses (mostly GA/helicopters) use the Doc 8643
+  manufacturer + model as a title guess; the API follows normalisation and
+  redirects. Profiles are fetched in batches of 20 titles
+  (`prop=pageimages|extracts|pageprops&pithumbsize=640`) for the 640 px photo,
+  intro extract and QID. CC BY-SA 4.0 — link the article on every card.
+- **Wikidata** — `wbgetentities` in batches of 50 QIDs for first flight
+  (P606), total produced (P1092) and wingspan (P2050). Render only the facts
+  that exist.
+- **Planespotters** (optional, aircraft profile only) —
+  `GET https://api.planespotters.net/pub/photos/hex/<hex>` returns one photo.
+  Free, no key, but strict terms: descriptive User-Agent with a contact, JSON
+  cached ≤24 h, images fetched by the browser from their CDN (never stored or
+  re-hosted), photographer credit + link to the photo page next to the image.
+  There is no type endpoint — use a representative airframe's photo.
 
----
+**Schema:** `aircraft_types` (designator PK, manufacturer, model, engine_type,
+engine_count, wtc, category, wiki_title, wiki_extract, wiki_image, wiki_url,
+first_flight, total_produced, wingspan_m, fetched_at);
+`CREATE INDEX idx_enrichment_typecode ON enrichment(typecode)` for the rarity
+denominator.
 
-## Step 8 — Polish
+**Queries (`stats.rs`):** `type_dex()` — per designator: distinct hex,
+sightings, first/last seen, max alt/speed/range, top operator, plus the OpenSky
+registered count as the rarity denominator; `type_aircraft(code)` — airframes
+seen, newest first.
 
-**Files:** `stats.rs`, `partials/emergencies.html`, `aircraft.html`, `web.rs`.
+**Routes:** `/types`, `/type/:code`, `/api/types`, `/api/type/:code`.
 
-- Squawk decode: 7500 hijack / 7600 radio / 7700 general, raw code kept.
-- Callsign→operator: build `prefix → operator` from
-  `enrichment.operatorcallsign` at startup; show `ROU1974 · Air Canada Rouge`.
-- `map` link on emergency rows.
+**UI:** `/types` card grid (photo, code, name, `caught / registered`, first
+seen; sort by count, rarity, name); `/type/:code` hero photo + extract + fact
+chips + "your catches" stats + airframe list; index "types caught" card; nav
+pill.
 
-**Verify:** labels render; known callsign shows operator; no startup errors.
+**Verify:** `/api/types` lists every seen type; `/type/B738` renders photo,
+extract and stats; boot with the network down still serves pages; no
+Planespotters image bytes are stored.
 
-**Commit:** `plane-stats: emergency squawk labels and callsign operator hints`
+**Commit:** `plane-stats: aircraft type dex`
 
 ---
 
@@ -289,5 +325,4 @@ re-notify; denied permission leaves the page functional.
 | 4. Filters | done | `plane-stats: fleet filters (category, military, recency, altitude)` |
 | 5. `day_aircraft` + `/today` | done | `plane-stats: daily ledger and /today digest` |
 | 6. Heatmap + range history | done | `plane-stats: activity heatmap and range history` |
-| 7. Notifications | pending | — |
-| 8. Polish | pending | — |
+| 7. Type dex | done | — |

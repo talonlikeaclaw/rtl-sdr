@@ -164,6 +164,36 @@ Activity (`/activity`, `/api/activity`):
   containing block for `position: fixed` descendants, so a tooltip inside the
   panel would be offset and stacked under later panels.
 
+Type dex (`/types`, `/type/:code`, `/api/types`, `/api/type/:code`):
+
+- `aircraft_types` holds one row per ICAO designator: Doc 8643 identity
+  (`manufacturer`, `model`, `engine_type`, `engine_count`, `wtc`, `category`)
+  plus the cached Wikipedia profile (`wiki_title`, `wiki_extract`, `wiki_image`,
+  `wiki_url`) and Wikidata facts (`first_flight`, `total_produced`,
+  `wingspan_m`). `type_wiki_map` is the curated designator → article table.
+- `types::run` is a background task spawned next to the poller. It loads
+  Doc 8643 (`POST https://doc8643.icao.int/External/AircraftTypes`; the
+  endpoint needs `Content-Length: 0` or it answers 411), then the Wikipedia
+  `List_of_aircraft_type_designators` wikitext, then profiles for types seen
+  on the air. Doc 8643 is refreshed monthly, the designator map weekly, and a
+  profile monthly; the task sleeps 1 h between cycles. Every failure is
+  non-fatal: pages render with whatever is cached.
+- Wikipedia requests are batched (20 titles per `pageimages|extracts|pageprops`
+  query, 50 QIDs per `wbgetentities` query) and spaced 2 s apart. A 429 backs
+  off 60 s and retries the batch three times; the task then stops until the
+  next hourly cycle. Do not switch back to one request per type: the extracts
+  API rate-limits quickly.
+- The dex lists only designators actually heard. `caught` is distinct
+  `aircraft.hex`; `registered` is `COUNT(*)` in `enrichment` for that
+  `typecode` (the rarity denominator). `enrichment_typecode` makes that
+  subquery cheap.
+- `TypeDexRow` lives in `stats.rs`; `type_dex`, `type_detail`, and
+  `type_dex_summary` back the pages. A designator is accepted only as 2–4
+  alphanumerics, upper-cased before lookup.
+- Photos are Wikipedia thumbnails (CC BY-SA; the card links the article). No
+  Planespotters: its terms forbid storing/re-hosting images and it has no type
+  endpoint.
+
 Refresh model (do not "simplify" back to a whole-table tick):
 
 - The fleet table's periodic refresh is 60 s, fetches `/partials/table/rows` and

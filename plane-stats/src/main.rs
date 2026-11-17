@@ -5,6 +5,7 @@ use rusqlite::{Connection, OptionalExtension};
 mod enrichment;
 mod poller;
 mod stats;
+mod types;
 mod web;
 
 pub type Db = Arc<Mutex<Connection>>;
@@ -105,6 +106,27 @@ fn main() {
            max_gs_kts REAL,
            max_range_nm REAL,
            PRIMARY KEY (day, hex)
+         );
+         CREATE TABLE IF NOT EXISTS aircraft_types (
+           designator TEXT PRIMARY KEY,
+           manufacturer TEXT,
+           model TEXT,
+           engine_type TEXT,
+           engine_count TEXT,
+           wtc TEXT,
+           category TEXT,
+           wiki_title TEXT,
+           wiki_extract TEXT,
+           wiki_image TEXT,
+           wiki_url TEXT,
+           first_flight TEXT,
+           total_produced TEXT,
+           wingspan_m TEXT,
+           wiki_fetched_at REAL
+         );
+         CREATE TABLE IF NOT EXISTS type_wiki_map (
+           designator TEXT PRIMARY KEY,
+           title TEXT NOT NULL
          );",
     )
     .expect("run migrations");
@@ -165,7 +187,8 @@ fn main() {
          CREATE INDEX IF NOT EXISTS aircraft_max_range  ON aircraft(max_range_nm DESC, hex);
          CREATE INDEX IF NOT EXISTS aircraft_max_rssi   ON aircraft(max_rssi_dbfs DESC, hex);
          CREATE INDEX IF NOT EXISTS emergency_log_hex   ON emergency_log(hex);
-         CREATE INDEX IF NOT EXISTS day_aircraft_hex    ON day_aircraft(hex);",
+         CREATE INDEX IF NOT EXISTS day_aircraft_hex    ON day_aircraft(hex);
+         CREATE INDEX IF NOT EXISTS enrichment_typecode ON enrichment(typecode);",
     )
     .expect("create indexes");
 
@@ -215,6 +238,9 @@ fn main() {
     let runtime = tokio::runtime::Builder::new_multi_thread().enable_all().build().expect("tokio runtime");
     runtime.block_on(async move {
         tokio::spawn(poller::run(db.clone(), source));
+        // Doc 8643 + Wikipedia profiles are cached in SQLite; the task never
+        // blocks startup and every page renders without it.
+        tokio::spawn(types::run(db.clone()));
 
         let app = web::router(db);
         let listener = tokio::net::TcpListener::bind("0.0.0.0:8081").await.expect("bind 8081");
