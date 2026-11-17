@@ -43,13 +43,35 @@
       <section class="glass panel" aria-label="Coverage">
         <h2>Coverage</h2>
         <div id="coverage" hx-get="/partials/coverage"
-             hx-trigger="every 10s [document.visibilityState === 'visible']">
+             hx-trigger="every 10s [document.visibilityState === 'visible' && !(document.activeElement && document.activeElement.closest('#coverage'))]">
           {% include "partials/coverage.html" %}
         </div>
+        <p id="coverage-live" class="sr-only" aria-live="polite"></p>
       </section>
     </main>
 
     <footer>LOCAL LEDGER · SQLITE · NO CLOUD</footer>
   </div>
+
+  <script>
+    // Announce the poll status after each swap without making the whole table
+    // a live region. The refresh pauses while focus is inside #coverage, so a
+    // keyboard user's place survives the 10 s tick.
+    (() => {
+      const live = document.getElementById("coverage-live");
+      if (!live) return;
+      let last = "";
+      document.body.addEventListener("htmx:afterSwap", (e) => {
+        if (e.detail.target.id !== "coverage") return;
+        const status = e.detail.target.querySelector(".coverage-status");
+        if (!status) return;
+        const stale = status.classList.contains("stale");
+        const key = stale ? "stale" : "ok";
+        if (key === last) return;
+        last = key;
+        live.textContent = stale ? status.textContent.trim() : "Network data is live.";
+      });
+    })();
+  </script>
 </body>
 </html>

@@ -37,15 +37,34 @@ typography:
     fontFamily: "system-ui, -apple-system, Segoe UI, Roboto, sans-serif"
     fontSize: "0.84rem"
     fontWeight: 400
+  body-small:
+    fontFamily: "system-ui, -apple-system, Segoe UI, Roboto, sans-serif"
+    fontSize: "0.8rem"
+    fontWeight: 400
   label:
     fontFamily: "system-ui, -apple-system, Segoe UI, Roboto, sans-serif"
     fontSize: "0.72rem"
     fontWeight: 600
     letterSpacing: "0.11em"
+  label-small:
+    fontFamily: "system-ui, -apple-system, Segoe UI, Roboto, sans-serif"
+    fontSize: "0.7rem"
+    fontWeight: 600
+    letterSpacing: "0.09em"
+  badge:
+    fontFamily: "system-ui, -apple-system, Segoe UI, Roboto, sans-serif"
+    fontSize: "0.75rem"
+    fontWeight: 400
+    letterSpacing: "0.04em"
   mono:
     fontFamily: "ui-monospace, SF Mono, Menlo, Consolas, monospace"
     fontSize: "0.78rem"
     fontWeight: 400
+  mono-small:
+    fontFamily: "ui-monospace, SF Mono, Menlo, Consolas, monospace"
+    fontSize: "0.72rem"
+    fontWeight: 400
+    letterSpacing: "0.08em"
 rounded:
   sm: "8px"
   md: "10px"
@@ -95,6 +114,17 @@ components:
   table-cell:
     textColor: "{colors.data-text}"
     padding: "0.5rem 0.8rem"
+  coverage-status:
+    textColor: "{colors.muted-slate}"
+    typography: "{typography.body-small}"
+  mlat-badge:
+    textColor: "{colors.sky-blue}"
+    typography: "{typography.badge}"
+    rounded: "{rounded.pill}"
+    padding: "0.05rem 0.35rem"
+  feed-key:
+    textColor: "{colors.faint-slate}"
+    typography: "{typography.label-small}"
 ---
 
 # Design System: plane-stats
@@ -120,16 +150,20 @@ thing only. Everything else is frosted white at low alpha.
 
 Restraint here is not absence of design; it is the precision of a panel where each
 mark has a job. Numbers are tabular so they do not jitter as they update. Uppercase is
-reserved for labels at 0.7–0.75rem with 0.11–0.16em tracking, so the eye can skip
-them. Panels are the composition: the page is a vertical stack of gauge faces, and the
-only thing that moves is the data inside them.
+reserved for labels at 0.7–0.75rem with 0.09–0.16em tracking, so the eye can skip
+them; the MLAT badge is the one tighter exception. Panels are the composition: the page
+is a vertical stack of gauge faces, and the only thing that moves is the data inside
+them.
 
 **Key Characteristics:**
 - Frosted glass panels over a near-black instrument ground; depth is material, not state.
 - One cool data hue (Sky Blue), one liveness hue (Signal Mint), one alarm hue (Emergency Amber).
 - System sans at three registers; mono only for machine strings (hex codes, footer).
 - Tabular numerals everywhere a value can change.
-- State changes are colour, border and background — never scale, bounce or translate.
+- State changes are colour, border and background — never scale, bounce or translate,
+  except the type-dex card's 2px hover lift.
+- Local-vs-network is a first-class comparison; stale network data is labelled, never
+  passed off as current.
 
 ## Colors
 
@@ -196,11 +230,15 @@ tracking and case, not from a second family.
   tabular-nums): card numerals — the biggest thing on the page after the title.
 - **Title** (600, 0.75rem, 0.16em, uppercase, Faint Slate): panel eyebrows, each with a
   2px Sky Blue Dim bar before it.
-- **Body** (400, 0.84rem): table content; 0.8rem for taglines and empty notes, 0.78rem
-  for pager and link cells, 0.75rem for chart captions.
+- **Body** (400, 0.84rem): table content; 0.8rem for taglines, coverage status and
+  empty notes, 0.78rem for pager and link cells, 0.75rem for chart captions and
+  network credit lines.
 - **Label** (600, 0.72rem, 0.11em, uppercase, Faint Slate): table headers, card
-  sublabels, filter-group labels.
-- **Mono** (400, 0.78rem): ICAO hex in the first table column, the footer line.
+  sublabels, filter-group labels. Feeder keys use the same role at 0.7rem / 0.09em.
+- **Badge** (400, 0.75rem, 0.04em, uppercase, Sky Blue): the MLAT marker in the
+  coverage table; the only inline pill badge.
+- **Mono** (400, 0.78rem): ICAO hex in the first table column.
+- **Mono Small** (400, 0.72rem, 0.08em): the footer credential line.
 
 ### Named Rules
 **The Tabular Rule.** Every number that can change — card numerals, table cells,
@@ -210,8 +248,9 @@ shifts the layout when it ticks is a bug.
 **The One Voice Rule.** No second sans family. If a form control does not inherit the
 stack, fix the control; do not add a font.
 
-**The Tracked Caps Rule.** Uppercase only at 0.7–0.75rem with at least 0.1em tracking.
-Body copy and data are never uppercase.
+**The Tracked Caps Rule.** Uppercase only at 0.7–0.75rem with at least 0.09em tracking.
+The MLAT badge is the one tighter exception at 0.04em. Body copy and data are never
+uppercase.
 
 ### Browser surfaces
 
@@ -242,10 +281,11 @@ desktop and still fits a phone without a second layout.
 - **Page order** answers the product's two questions first: *Overhead now* → *Summary* →
   *All-time fleet* → *Recent new arrivals* → *Emergency log*. The live table leads because
   "what is in the sky" is the question the operator opens the page with.
-- **Card grid** is `repeat(auto-fit, minmax(10.5rem, 1fr))` with `0.75rem` gaps — the
-  count of stat cards changes the rows, never the column width. Cards are grouped under
-  `.group-label` eyebrows (*Right now* / *Ledger* / *Records*) with a hairline rule
-  running to the right edge, so thirteen tiles read as three ideas.
+- **Card grid** is `repeat(4, minmax(0, 1fr))` with `0.75rem` gaps — the count of stat
+  cards changes the rows, never the column width. Container queries drop it to 2 columns
+  below 30rem and 1 below 10rem. Cards are grouped under `.group-label` eyebrows
+  (*Right now* / *Ledger* / *Records*) with a hairline rule running to the right edge, so
+  thirteen tiles read as three ideas.
 - **Tables** live in a `.table-wrap` with `overflow-x: auto` and a 10px radius; the page
   never scrolls horizontally, the table does. A `local`/`scroll` background pair draws a
   14px vignette at each edge — sized to the cell padding, so it never reaches the content.
@@ -253,6 +293,19 @@ desktop and still fits a phone without a second layout.
   right layer is pinned to the edge. It is a soft well edge, not a "more to the right"
   indicator: an attachment pair cannot express "visible unless at the end", and at 24px
   the right layer covered the last column's links once the table was scrolled fully.
+- **Coverage** is one panel: a status line, five stat cards, then two tables. The
+  local-vs-network set is a 60 s rolling comparison; stale network data is labelled, not
+  hidden. An empty state is a sibling of `.table-wrap`, never a row inside it, so a
+  one-line message never needs horizontal scroll.
+- **`/today`** carries a fifth "network saw" card in the At a glance group, with coverage
+  percentage and only-you / only-network counts. It shows `-` and "network data
+  unavailable" when the poller has no current network sample.
+- **Feeder** on the dashboard is a six-item key/value grid
+  (`repeat(auto-fit, minmax(170px, 1fr))`), not a table: feed client, network API,
+  feeder recognized, network totals, nearby feeders, local poller.
+- **Type dex** is a photo-led card grid (`repeat(auto-fill, minmax(220px, 1fr))`) with
+  14px cards, a 16:10 photo, a 0.9rem name, a 0.72rem mono designator, and a 4px progress
+  bar.
 - **The fleet table pins its hex column** (`position: sticky; left: 0`) so the row keeps
   its identity while the remaining twelve columns scroll under it on a phone.
 - **A table that can grow without bound is capped** with `scrollbar-gutter: stable` and a
@@ -266,9 +319,11 @@ desktop and still fits a phone without a second layout.
   edge and lets a longer one grow visibly instead of wrapping silently.
 - **Charts** use a two-column grid, `auto minmax(0, 1fr)`, with a 2.1rem y-axis column;
   the SVG scales to width with `height: auto`.
-- **Breakpoint:** one, at 640px — panel padding drops to `1rem 0.9rem 1.1rem`, card
-  minimum to 9rem, blur to 14px, the `.meta` suffix in the tagline is hidden, filter
-  labels take a full line above their chips, and heat cells keep a 14px floor.
+- **Breakpoints:** 640px for the shell — panel padding drops to `1rem 0.9rem 1.1rem`,
+  blur to 14px, the `.meta` suffix in the tagline is hidden, filter labels take a full
+  line above their chips, and heat cells keep a 14px floor. The type-dex hero collapses
+  at 720px. The card grid also reflows by container query at 30rem (2 columns) and 10rem
+  (1 column), so 200% text drops columns instead of clipping numerals.
 
 ## Elevation & Depth
 
@@ -278,12 +333,14 @@ top highlight, one deep shadow, and a 1px outline set 5px out — the instrument
 A 1px gradient hairline sits along the top edge of each `.glass` panel, brightest in the
 middle, as the highlight of a glass face.
 
-Depth is material, not state: nothing lifts, scales or shadows on hover. A row changes
+Depth is material, not state: nothing lifts, scales or shadows on hover, with one
+exception — the type-dex card lifts 2px because the whole card is a link. A row changes
 its background by 3.5% white; a header cell by 5%. That is the whole elevation
 vocabulary.
 
 ### Shadow Vocabulary
-- **panel-lift** (`0 18px 44px -26px rgba(0, 0, 0, 0.85)`): every `.glass` panel and card.
+- **panel-lift** (`0 18px 44px -26px rgba(0, 0, 0, 0.85)`): every `.glass` panel. Cards
+  carry only the inset highlight.
 - **inset-highlight** (`inset 0 1px 0 rgba(255, 255, 255, 0.1)`): the top edge of panels,
   cards, pills and chips.
 - **bezel-ring** (`outline: 1px solid rgba(255, 255, 255, 0.035); outline-offset: 5px`):
@@ -297,7 +354,8 @@ vocabulary.
 chips and inputs get the inset highlight and nothing else.
 
 **The No-Lift Rule.** Hover and focus change colour, border or background. They never
-change transform, size or shadow.
+change transform, size or shadow. The type-dex card is the one exception: it lifts 2px
+on hover because the whole card is a link.
 
 ## Shapes
 
@@ -307,7 +365,7 @@ as sitting inside a panel.
 
 Component-local geometry sits outside the ladder and is not a step: 3px heat cells, 2px
 top corners on histogram bars, 1px waveform caps, 7px on the chart tooltip, 12px on the
-logo tile.
+logo tile and type-dex hero images, 14px on type-dex cards.
 
 Recurring geometry:
 - **2px accent ticks** — the bar before a panel eyebrow, the left-edge marker on each
@@ -337,8 +395,9 @@ Sky Blue Dim outline at 2px offset.
 ### Cards (stat cards)
 13px radius, `1rem 1.1rem 1.05rem` padding, glass gradient, inset highlight. A 2px Sky
 Blue Dim tick at the top-left edge, 0.7rem tall. Inside: numeral (Headline, tabular),
-sublabel (Label, uppercase, Faint Slate), and an optional `who` line at 0.72rem in Muted
-Slate that links to the aircraft profile in Sky Blue.
+sublabel (Label, uppercase, Faint Slate), and an optional `who` line at 0.78rem in Muted
+Slate that links to the aircraft profile in Sky Blue. The `who` line is clamped to two
+lines and breaks long identities rather than ellipsizing them.
 
 ### Panels
 The composition unit. `.glass` + `1.2rem 1.35rem 1.35rem` padding + `1.25rem` bottom
@@ -352,11 +411,48 @@ on hover, and the active one turns Sky Blue with a ▾/▴ glyph. Rows: 0.84rem 
 Text, 4.5% white bottom border, hover background 3.5% white. The first column is mono at
 0.78rem in Sky Blue Dim — the hex code is the row's identity.
 
+### Coverage comparison (/coverage)
+One panel answers "what did I hear that the network did not, and vice versa?" A status
+line (`network poll 7s ago` in Muted Slate, stale in Emergency Amber) sits above five
+stat cards: local live, network live, overlap, only you, missed. When the network poll is
+stale, every network-derived card shows `-` and says `last good poll`; local live stays
+current. The two tables are *Only you saw* and *Network saw, you missed*; the missed table
+carries an MLAT badge and an adsb.fi link. An empty state is a sibling of the table, never
+a row inside it. The 10 s htmx refresh pauses while focus is inside the region and
+announces only live/stale transitions through a polite live region.
+
+**The Stale Rule.** A stale network poll never reads as current: every network-derived
+card shows `-` and names the last good poll; local counts stay live.
+
+**The Focus-Safe Refresh Rule.** An auto-refreshing region pauses while focus is inside
+it, and status changes are announced through a polite live region rather than by
+replacing the focused content.
+
+### Feeder status (dashboard)
+A six-item key/value grid, not a table: Feed client, Network API, Feeder recognized,
+Network totals, Nearby feeders, Local poller. Keys are 0.7rem tracked uppercase Faint
+Slate; values 0.9rem Instrument Text; a failed value turns Emergency Amber. The grid is
+`repeat(auto-fit, minmax(170px, 1fr))` with `0.75rem 1rem` gaps, so it reflows without a
+media query. The card ends with the shared `.type-credit` network line.
+
+### Type dex cards (/types)
+A photo-led card grid (`repeat(auto-fill, minmax(220px, 1fr))`, 14px radius, 16:10 photo,
+0.9rem name, 0.72rem mono designator, 4px progress bar). It is the one place a card lifts
+on hover (`translateY(-2px)`), because the whole card is a link; every other surface
+follows the No-Lift Rule.
+
+### Network credit
+`.type-credit` is the shared provenance line: 0.75rem Faint Slate, link in Sky Blue,
+`0.45rem` top margin. It appears on `/coverage`, the dashboard Feeder card, `/today`, and
+the aircraft profile.
+
 ### Inputs
 Search field: full width, 10px radius, glass gradient, 0.85rem, placeholder in Muted
-Slate, focus border in Sky Blue Dim (no ring, no glow). Altitude fields: 8px radius,
-5.2rem wide, right-sized numerals. Both take a 2px Sky Blue Dim halo on focus
-(`box-shadow`), because a 1px border shift alone is not a focus indicator.
+Slate, focus border in Sky Blue Dim (no ring, no glow). Known defect: the search field
+does not inherit the system sans and computes to Arial; fix the control, not the stack.
+Altitude fields: 8px radius, 5.2rem wide, right-sized numerals. Both take a 2px Sky Blue
+Dim halo on focus (`box-shadow`), because a 1px border shift alone is not a focus
+indicator.
 
 ### Sortable headers
 A sortable `<th>` contains a real `<button class="sort">`, not a bare `hx-get` on the
@@ -435,6 +531,10 @@ A key-value panel is the same rule. The profile's Identity panel is one table of
 `.empty-row` across both columns: `No registration data. This hex is not in the OpenSky
 database — the ledger still has every time the receiver heard it.` The panel still answers
 the question it exists to answer, which is "why is this blank".
+
+On `/coverage`, the empty state is a sibling of `.table-wrap`, not a row inside it. A
+one-line state must never inherit the table's horizontal scroll or be clipped to the
+table's width; the table renders only when it has rows.
 
 ### Charts and heatmap (signature)
 The `/today` histogram is a 24-column CSS grid, 120px tall, with three hairline
@@ -521,15 +621,21 @@ One noun per concept, everywhere. These are the words; anything else is a bug.
 - **Do** open each panel with a tracked uppercase eyebrow and its 2px accent bar.
 - **Do** use Sky Blue Dim for focus borders and the hex column, full Sky Blue for links
   and active state.
-- **Do** keep the 640px breakpoint the only layout break, and let tables scroll
-  horizontally inside `.table-wrap` rather than the page.
+- **Do** keep the 640px shell breakpoint and the 720px type-hero breakpoint, and let
+  tables scroll horizontally inside `.table-wrap` rather than the page.
 - **Do** respect `prefers-reduced-motion` — the stylesheet already collapses all
   animation and transition durations.
-- **Do** keep every functional label at 11px or larger and at 4.5:1 or better; the
-  detector's `undersized-ui-text` and `low-contrast` rules are the floor, not a style
-  opinion.
+- **Do** keep every functional label at 11px or larger, body text at 12px or larger, and
+  both at 4.5:1 or better; the detector's `undersized-ui-text` and `low-contrast` rules
+  are the floor, not a style opinion.
 - **Do** give every auto-updating region a `<caption class="sr-only">` and `scope="col"`
   headers, and keep the skip link first in `<body>`.
+- **Do** pause an auto-refreshing region while focus is inside it, and announce only
+  status transitions through a polite live region.
+- **Do** render an empty state outside a horizontally scrolling table; a one-line state
+  must not inherit the table's width or scroll.
+- **Do** label stale network data: network-derived cards show `-` and `last good poll`;
+  local counts stay live.
 - **Do** give every text-sized control a 24×24 hit area (WCAG 2.5.8) by growing its
   padding into the surrounding whitespace with an equal negative margin: `.pager-link`,
   `td a`, `.chart-table > summary`, and `th .sort` (whose padding matches the `<th>`'s,
@@ -547,8 +653,12 @@ One noun per concept, everywhere. These are the words; anything else is a bug.
 - **Don't** treat the emergency log as an alert. It is an archive of events that
   happened — the owner's words — so it stays a normal panel at the bottom with no toast,
   no badge and no assertive live region.
+- **Don't** make the whole coverage panel a live region. Announce the status line only;
+  a table that re-announces every 10 s is noise.
+- **Don't** put an empty state inside a table row on a narrow viewport. It inherits the
+  table's width and clips; render it as a sibling of `.table-wrap`.
 - **Don't** add scale, translate or bounce transitions. State changes are colour, border
-  and background only.
+  and background only. The type-dex card's 2px hover lift is the one exception.
 - **Don't** size a card grid by viewport width alone. A fixed 2- or 4-column count clips
   the content at 200% text on every screen; the container query is what keeps 1.4.10
   (Reflow) true. Every `.cards` needs a `.card-group` parent, or it has no container to

@@ -42,13 +42,26 @@
       <section class="glass panel" aria-label="Caught types">
         <h2>Caught types</h2>
 
+        <form class="filter-row" method="get" action="/types" role="search">
+          <span class="filter-label">Search</span>
+          <input class="search type-search" type="search" name="q" value="{{ q }}"
+                 maxlength="64" spellcheck="false" autocapitalize="none" enterkeyhint="search"
+                 placeholder="Designator, manufacturer or name — C17, Globemaster, Boeing"
+                 aria-label="Search caught types">
+          <input type="hidden" name="sort" value="{{ sort }}">
+          <button class="chip" type="submit">Find</button>
+          {% if !q.is_empty() %}
+          <a class="chip" href="/types?sort={{ sort }}">Clear</a>
+          {% endif %}
+        </form>
+
         <div class="filter-row" role="group" aria-label="Sort">
           <span class="filter-label">Sort</span>
           <div class="chips">
-            <a class="chip{% if sort == "count" %} chip-on{% endif %}" href="/types?sort=count">Most caught</a>
-            <a class="chip{% if sort == "rarity" %} chip-on{% endif %}" href="/types?sort=rarity">Rarest</a>
-            <a class="chip{% if sort == "recent" %} chip-on{% endif %}" href="/types?sort=recent">Recently heard</a>
-            <a class="chip{% if sort == "name" %} chip-on{% endif %}" href="/types?sort=name">Name</a>
+            <a class="chip{% if sort == "count" %} chip-on{% endif %}" href="/types?sort=count{{ q_suffix }}">Most caught</a>
+            <a class="chip{% if sort == "rarity" %} chip-on{% endif %}" href="/types?sort=rarity{{ q_suffix }}">Rarest</a>
+            <a class="chip{% if sort == "recent" %} chip-on{% endif %}" href="/types?sort=recent{{ q_suffix }}">Recently heard</a>
+            <a class="chip{% if sort == "name" %} chip-on{% endif %}" href="/types?sort=name{{ q_suffix }}">Name</a>
           </div>
         </div>
 
@@ -76,7 +89,13 @@
         </div>
 
         {% if dex.is_empty() %}
-        <p class="empty-row">No types yet. The dex fills as the poller hears aircraft with a type code in the OpenSky database.</p>
+        <p class="empty-row">
+          {% if q.is_empty() %}
+          No types yet. The dex fills as the poller hears aircraft with a type code in the OpenSky database.
+          {% else %}
+          No caught type matches “{{ q }}”. The dex only lists types the receiver has actually logged.
+          {% endif %}
+        </p>
         {% endif %}
       </section>
     </main>

@@ -88,6 +88,21 @@ fn strip_port(host: &str) -> &str {
     }
 }
 
+/// Percent-encode a query value. The type-dex search is echoed into the sort
+/// links, so a `&` or `#` typed by the user must not split the URL.
+fn urlencode(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    for b in s.bytes() {
+        match b {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
+                out.push(b as char)
+            }
+            _ => out.push_str(&format!("%{b:02X}")),
+        }
+    }
+    out
+}
+
 /// An ICAO24 address is six hex digits. Accept up to eight so a future
 /// non-ICAO emitter does not 404, and reject anything else before it reaches
 /// the database or an error page.
@@ -630,6 +645,8 @@ async fn api_coverage(State(db): State<Db>) -> Result<Json, ApiError> {
 struct TypeParams {
     #[serde(default)]
     sort: String,
+    #[serde(default)]
+    q: String,
 }
 
 #[derive(Template)]
@@ -638,6 +655,9 @@ struct TypesTemplate {
     dex: Vec<stats::TypeDexRow>,
     summary: stats::TypeDexSummary,
     sort: String,
+    q: String,
+    /// `&q=...` for the sort links, empty when the search box is blank.
+    q_suffix: String,
     tar1090: String,
 }
 
@@ -647,6 +667,10 @@ async fn types_page(
     headers: HeaderMap,
 ) -> Result<Html<String>, AppError> {
     let mut dex = stats::type_dex(&db)?;
+    let search = q.q.trim().to_string();
+    if !search.is_empty() {
+        dex.retain(|t| t.matches(&search));
+    }
     let sort = match q.sort.as_str() {
         "rarity" | "name" | "recent" => q.sort.clone(),
         _ => "count".to_string(),
@@ -667,11 +691,18 @@ async fn types_page(
         }),
         _ => {}
     }
+    let q_suffix = if search.is_empty() {
+        String::new()
+    } else {
+        format!("&q={}", urlencode(&search))
+    };
     Ok(Html(
         TypesTemplate {
             dex,
             summary: stats::type_dex_summary(&db)?,
             sort,
+            q: search,
+            q_suffix,
             tar1090: tar1090_base(&headers),
         }
         .render()?,

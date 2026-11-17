@@ -3,22 +3,22 @@
 <div class="card-group">
   <div class="cards">
     <div class="card"><div class="num">{{ coverage.local_count }}</div><div class="sub">local live</div><div class="who">heard in the last 60 s</div></div>
-    <div class="card"><div class="num">{{ coverage.network_count }}</div><div class="sub">network live</div><div class="who">within {{ coverage.radius_nm }} NM</div></div>
-    <div class="card"><div class="num">{{ coverage.overlap }}</div><div class="sub">overlap</div><div class="who">heard by both</div></div>
-    <div class="card"><div class="num">{{ coverage.unique }}</div><div class="sub">only you</div><div class="who">not on the network</div></div>
-    <div class="card"><div class="num">{% if coverage.stale %}-{% else %}{{ coverage.missed }}{% endif %}</div><div class="sub">missed</div><div class="who">network only</div></div>
+    <div class="card"><div class="num">{% if coverage.stale %}-{% else %}{{ coverage.network_count }}{% endif %}</div><div class="sub">network live</div><div class="who">{% if coverage.stale %}last good poll{% else %}within {{ coverage.radius_nm }} NM{% endif %}</div></div>
+    <div class="card"><div class="num">{% if coverage.stale %}-{% else %}{{ coverage.overlap }}{% endif %}</div><div class="sub">overlap</div><div class="who">{% if coverage.stale %}last good poll{% else %}heard by both{% endif %}</div></div>
+    <div class="card"><div class="num">{% if coverage.stale %}-{% else %}{{ coverage.unique }}{% endif %}</div><div class="sub">only you</div><div class="who">{% if coverage.stale %}network data stale{% else %}not on the network{% endif %}</div></div>
+    <div class="card"><div class="num">{% if coverage.stale %}-{% else %}{{ coverage.missed }}{% endif %}</div><div class="sub">missed</div><div class="who">{% if coverage.stale %}last good poll{% else %}network only{% endif %}</div></div>
   </div>
 </div>
 
 <h3 class="group-label">Only you saw</h3>
+{% if coverage.unique_rows.is_empty() %}
+<p class="empty-row">Every aircraft you heard in the last 60 s was also on the network.</p>
+{% else %}
 <div class="table-wrap">
   <table>
     <caption class="sr-only">Aircraft only the local receiver heard in the last 60 s</caption>
     <thead><tr><th scope="col">Hex</th><th scope="col">Callsign</th><th scope="col">Registration</th><th scope="col">Type</th><th scope="col">Alt (ft)</th><th scope="col">Range (nm)</th><th scope="col">Last seen</th><th scope="col">Links</th></tr></thead>
     <tbody>
-      {% if coverage.unique_rows.is_empty() %}
-      <tr><td colspan="8" class="empty-row">Every aircraft you heard in the last 60 s was also on the network.</td></tr>
-      {% endif %}
       {% for r in coverage.unique_rows %}
       <tr>
         <td class="hex">{{ r.hex }}</td>
@@ -37,16 +37,17 @@
     </tbody>
   </table>
 </div>
+{% endif %}
 
 <h3 class="group-label">Network saw, you missed</h3>
+{% if coverage.missed_rows.is_empty() %}
+<p class="empty-row">{% if coverage.stale %}No recent network poll. The last good data is shown above.{% else %}The network heard nothing within {{ coverage.radius_nm }} NM that you missed.{% endif %}</p>
+{% else %}
 <div class="table-wrap">
   <table>
     <caption class="sr-only">Aircraft adsb.fi heard in the last 60 s that the local receiver did not</caption>
     <thead><tr><th scope="col">Hex</th><th scope="col">Callsign</th><th scope="col">Registration</th><th scope="col">Type</th><th scope="col">Alt (ft)</th><th scope="col">Range (nm)</th><th scope="col">Bearing</th><th scope="col">Age</th><th scope="col">MLAT</th><th scope="col">adsb.fi</th></tr></thead>
     <tbody>
-      {% if coverage.missed_rows.is_empty() %}
-      <tr><td colspan="10" class="empty-row">{% if coverage.stale %}No recent network poll. The last good data is shown above.{% else %}The network heard nothing within {{ coverage.radius_nm }} NM that you missed.{% endif %}</td></tr>
-      {% endif %}
       {% for r in coverage.missed_rows %}
       <tr>
         <td class="hex">{{ r.hex }}</td>
@@ -64,5 +65,6 @@
     </tbody>
   </table>
 </div>
+{% endif %}
 
 <p class="type-credit">Network data: <a href="https://adsb.fi/" target="_blank" rel="noopener">adsb.fi</a></p>

@@ -461,7 +461,15 @@ td { overflow-wrap: break-word; }
   overflow-y: auto;
   scrollbar-gutter: stable;
 }
-.live-wrap { max-height: 40vh; }
+/* Fixed, not max-height: the live panel refreshes every 5 s and its row
+   count changes as aircraft come and go. A content-sized panel changed the
+   height of everything below it on every tick, which iOS Safari (no scroll
+   anchoring) turned into a page jump while reading the fleet. The table
+   scrolls inside the panel; the page layout stays put.
+   16.75rem = header (1.9rem) + 7 rows (2.03rem each) + the border and the
+   collapsed-border rounding, the usual peak over this receiver; the 8th
+   aircraft scrolls. */
+.live-wrap { height: 16.75rem; }
 .tall-wrap { max-height: 60vh; }
 .live-wrap thead th,
 .tall-wrap thead th {
@@ -606,6 +614,9 @@ input.search {
 }
 input.search::placeholder { color: var(--muted); }
 input.search:focus { border-color: var(--accent-dim); }
+/* Inline variant: the type-dex search sits in a `.filter-row` next to its
+   label and Find button instead of taking a full-width line of its own. */
+input.search.type-search { flex: 1 1 16rem; width: auto; min-width: 0; margin: 0; }
 
 /* Fleet filter rows */
 .filter-row {
@@ -1224,7 +1235,7 @@ td.links a:hover { text-decoration: underline; }
 .type-name { font-size: 0.9rem; font-weight: 600; line-height: 1.25; }
 .type-bar { height: 4px; border-radius: 999px; background: rgba(255, 255, 255, 0.08); overflow: hidden; }
 .type-bar span { display: block; height: 100%; border-radius: inherit; background: var(--accent); }
-.type-sub { font-size: 0.68rem; color: var(--faint); }
+.type-sub { font-size: 0.7rem; color: var(--faint); }
 
 .type-hero {
   display: grid;
@@ -1250,7 +1261,7 @@ td.links a:hover { text-decoration: underline; }
   color: var(--accent);
 }
 .type-extract { margin: 0 0 0.75rem; font-size: 0.9rem; line-height: 1.55; color: var(--muted); }
-.type-credit { margin: 0.45rem 0 0; font-size: 0.68rem; color: var(--faint); }
+.type-credit { margin: 0.45rem 0 0; font-size: 0.75rem; color: var(--faint); }
 .type-facts { display: flex; flex-wrap: wrap; gap: 0.45rem; margin-top: 0.8rem; }
 .fact {
   padding: 0.25rem 0.6rem;
@@ -1266,7 +1277,7 @@ td.links a:hover { text-decoration: underline; }
 .coverage-status.stale { color: var(--warning); }
 .mlat-badge {
   display: inline-block; padding: 0.05rem 0.35rem; border-radius: 999px;
-  border: 1px solid rgba(158, 197, 232, 0.35); font-size: 0.62rem;
+  border: 1px solid var(--accent-dim); font-size: 0.75rem;
   color: var(--accent); letter-spacing: 0.04em;
 }
 
@@ -1276,7 +1287,7 @@ td.links a:hover { text-decoration: underline; }
 }
 .feed-item { min-width: 0; }
 .feed-item dt {
-  font-size: 0.68rem; letter-spacing: 0.09em; text-transform: uppercase;
+  font-size: 0.7rem; letter-spacing: 0.09em; text-transform: uppercase;
   color: var(--faint);
 }
 .feed-item dd { margin: 0.2rem 0 0; font-size: 0.9rem; color: var(--text); }

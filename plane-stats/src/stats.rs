@@ -2170,6 +2170,23 @@ impl TypeDexRow {
     pub fn wtc_str(&self) -> Option<&str> {
         self.wtc.as_deref()
     }
+    /// Case-insensitive substring match on the fields the dex shows:
+    /// designator, manufacturer, Doc 8643 model and the Wikipedia title.
+    /// "c17", "boeing" and "globemaster" all find the C-17.
+    pub fn matches(&self, query: &str) -> bool {
+        let q = query.trim().to_lowercase();
+        q.is_empty()
+            || [
+                Some(self.designator.as_str()),
+                self.manufacturer.as_deref(),
+                self.model.as_deref(),
+                self.wiki_title.as_deref(),
+            ]
+            .into_iter()
+            .flatten()
+            .any(|field| field.to_lowercase().contains(&q))
+    }
+
     pub fn display_name(&self) -> String {
         // The Wikipedia title is the recognizable name ("Boeing 737 MAX",
         // "Bombardier CRJ700 series"); Doc 8643's canonical model can be a
@@ -2497,5 +2514,40 @@ mod tests {
         assert_eq!(valid.type_url().as_deref(), Some("/type/B738"));
         let invalid = super::Record { hex: "B7380".into(), ..Default::default() };
         assert_eq!(invalid.type_url(), None);
+    }
+
+    /// The dex search must find a type by designator, manufacturer or the
+    /// name shown on the card; searching "C17" alone was the reported dead end.
+    #[test]
+    fn type_search_matches_designator_manufacturer_and_name() {
+        let c17 = super::TypeDexRow {
+            designator: "C17".into(),
+            manufacturer: Some("BOEING".into()),
+            model: Some("C-17".into()),
+            wiki_title: Some("Boeing C-17 Globemaster III".into()),
+            engine_type: None,
+            engine_count: None,
+            wtc: None,
+            category: None,
+            wiki_extract: None,
+            wiki_image: None,
+            wiki_url: None,
+            first_flight: None,
+            total_produced: None,
+            wingspan_m: None,
+            caught: 1,
+            registered: 300,
+            first_seen: None,
+            last_seen: None,
+            sightings: 1,
+            max_alt_ft: None,
+            max_gs_kts: None,
+            max_range_nm: None,
+        };
+        for q in ["c17", "C-17", "boeing", "globemaster", "  C17  "] {
+            assert!(c17.matches(q), "{q}");
+        }
+        assert!(!c17.matches("airbus"));
+        assert!(c17.matches(""));
     }
 }

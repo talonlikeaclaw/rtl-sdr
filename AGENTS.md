@@ -7,6 +7,9 @@ Context an agent needs before touching this repo.
 - Pi 4 (arm64), one RTL-SDR Blog V4L dongle.
 - Docker Compose project `name: sdr`.
 - **Only one profile may be `up` at a time** — the dongle is exclusive.
+- tar1090's `/var/globe_history` (heatmap, traces, coverage/radar outline) is
+  the named volume `tar1090_globe_history`. Without it the data lives in the
+  container layer and a recreate wipes the radar history.
 
 ## Driver gotcha
 
@@ -147,9 +150,22 @@ this week, not seen this week, regulars = 5+ visits, max-alt range;
 `FleetFilter` in `stats.rs`, `filter_suffix` on sort/pager links, `db_flags`
 stored from tar1090 `dbFlags`).
 
-Military, Interesting and Privacy rows only match once re-seen: `db_flags` was
-added after the fact, so older rows are NULL until the aircraft flies past
-again (tar1090 omits `dbFlags` when it is 0, hence the `coalesce` on upsert).
+`db_flags` is stored from tar1090 `dbFlags`. The tar1090 service sets
+`TAR1090_ENABLE_AC_DB=true`, which makes its internal readsb load
+`aircraft.csv.gz` from tar1090-db and emit all four bits (military,
+interesting, PIA, LADD). Without that file readsb suppresses `dbFlags`
+entirely, even the military range bit (`json_out.c` gates the field on
+`Modes.db`). The poller also derives the **military** bit from the ICAO ranges
+in `plane-stats/src/mil.rs` (a copy of tar1090's `ranges.js` fallback, e.g.
+RCAF `C2xxxx`) and ORs it into whatever `dbFlags` was sent, so military works
+even if the DB download fails. The `mil_ranges_v1` key in `enrichment_meta`
+guards a one-shot backfill of older rows; bump it if `mil::RANGES` changes.
+`dbflags::backfill` also ORs the flags from the tar1090-db CSV baked into the
+image (`TAR1090_DB_CSV`, downloaded in the Docker `csv` stage) into every
+aircraft already in the ledger, so historical rows get interesting/PIA/LADD
+without waiting to be re-seen. Its `enrichment_meta.key = 'tar1090_db'` stamp
+is size+mtime; bump `CSV_VERSION` to refresh the CSV. The `coalesce` on upsert
+preserves previously stored bits when tar1090 omits `dbFlags`.
 
 Daily ledger (`day_aircraft`) and `/today`:
 
@@ -239,6 +255,11 @@ Type dex (`/types`, `/type/:code`, `/api/types`, `/api/type/:code`):
   `type_dex_summary` back the pages. A designator is accepted only as 2–4
   alphanumerics (`stats::valid_designator`, shared by the route and the links),
   upper-cased before lookup.
+- `/types?q=` filters the dex server-side via `TypeDexRow::matches`: a
+  case-insensitive substring of designator, manufacturer, Doc 8643 model or
+  Wikipedia title, so "C17", "Boeing" and "Globemaster" all find the C-17.
+  The sort chips carry `q` (`q_suffix`), and the form keeps `sort` in a hidden
+  input.
 - Every designator the UI renders links to `/type/:code`: the fleet table, the
   live panel, the dashboard "types caught" card and recent arrivals, `/today`'s
   new list, and the aircraft profile (tagline, Model row, hero pill). Rows go
@@ -261,9 +282,14 @@ Refresh model (do not "simplify" back to a whole-table tick):
   user request.
 - Filter state travels in request bodies (`hx-include="#fleet-controls"`), not
   in generated `filter_suffix` query strings.
-- The live panel is capped at `40vh` (`.live-wrap`) and server-renders
+- The live panel has a **fixed** height of `16.25rem` on `.live-wrap`
+  (header + 7 rows, the usual peak; the 8th scrolls) and server-renders
   `live_aircraft()` via the `live` template field — the include must never
   resolve to `rows` (the fleet page), or the first tick collapses the panel.
+  Do not go back to `max-height`: the panel refreshes every 5 s and its row
+  count changes, so a content-sized panel shifted every panel below it on each
+  tick (iOS Safari has no scroll anchoring, so the page jumped while reading
+  the fleet).
 - `stats()` is cached for 10 s (`stats_cached`) because it is 16 all-time
   aggregates; `/api/stats` stays uncached.
 - `poll_hour` is the hourly `MAX(aircraft_count)` rollup the cards read instead

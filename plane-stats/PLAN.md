@@ -298,6 +298,371 @@ Planespotters image bytes are stored.
 
 ---
 
+## Step 8 — adsb.fi network integration
+
+**Goal:** use the feeder API for four surfaces: a live local-vs-network
+coverage page, network enrichment fallback, a feeder status card, and a
+network line in the daily digest.
+
+**Non-goals:** no historical API (there is none), no global snapshot storage,
+no network positions injected into tar1090. tar1090 stays the local receiver
+view; plane-stats owns the comparison.
+
+**API facts (verified 2026-11-17):**
+
+- Public, 1 req/s: `GET {base}/v3/lat/{lat}/lon/{lon}/dist/{dist}` (≤250 NM).
+  Response is `{ac:[...]}`; fields include `hex`, `flight`, `r`, `t`, `desc`,
+  `ownOp`, `year`, `alt_baro`, `gs`, `lat`, `lon`, `dst`, `dir`, `seen`,
+  `seen_pos`, `mlat`, `squawk`, `category`, `track`, `baro_rate`.
+- Feeder, 1 req/30 s: `GET {base}/v2/snapshot` (all ~7.7k aircraft, ~1 MB
+  gzipped). `HEAD` returns 200 for a recognized feeder IP and is cheap.
+- Website endpoints (undocumented, cache): `https://api.adsb.fi/v1/stats`
+  (`beastFeeders`, `mlatFeeders`, `totalAircraft`) and `/v1/coverage`
+  (`user`, `lat`, `lon` per feeder).
+- Terms: personal/non-commercial; cite adsb.fi and link
+  <https://adsb.fi/> on every page that renders network data.
+
+**Decisions:**
+
+- Use the public v3 radius endpoint for the live view (10 s, small response,
+  `dst`/`dir`), not the global snapshot (1 MB, 1/30 s). The snapshot is used
+  only for the cheap HEAD feeder check.
+- Diff a 60 s rolling network set, not one poll, so a single missed poll does
+  not create a false "unique" row.
+- Exclude ground contacts from coverage and the digest; airport ground
+  clutter is not a coverage gap.
+- Keep tar1090 local-only. Network data lives in plane-stats.
+
+### 8.0 Foundation — network poller, schema, shared state
+
+**Files:** new `src/network.rs`; `src/main.rs` (mod + schema + spawn);
+`src/poller.rs` (`Alt` -> `pub(crate)`); `docker-compose.yml`.
+
+**Config (new env, defaults in compose):**
+
+| Variable | Default | Meaning |
+|---|---|---|
+| `ADSB_FI_API` | `https://opendata.adsb.fi/api` | Open-data base |
+| `ADSB_FI_WEB_API` | `https://api.adsb.fi` | Website stats/coverage base |
+| `NETWORK_RADIUS_NM` | `100` | v3 query radius, clamp 10..250 |
+| `NETWORK_POLL_SECS` | `10` | v3 poll interval, min 5 |
+| `FEEDER_CHECK_SECS` | `35` | `HEAD /v2/snapshot` interval |
+| `NETWORK_STATS_SECS` | `300` | `/v1/stats` cache |
+| `NETWORK_COVERAGE_SECS` | `600` | `/v1/coverage` cache |
+| `FEED_JSON` | `/run/adsbfi-feed/aircraft.json` | Host feed status file |
+
+If `RX_LAT`/`RX_LON` are unset, log `network poller disabled` and return; the
+rest of the app is unaffected.
+
+**Schema (add to the `CREATE TABLE IF NOT EXISTS` batch in `main.rs`):**
+
+```sql
+CREATE TABLE IF NOT EXISTS network_day_aircraft (
+  day TEXT NOT NULL,
+  hex TEXT NOT NULL,
+  first_ts REAL NOT NULL,
+  last_ts  REAL NOT NULL,
+  polls INTEGER NOT NULL DEFAULT 1,
+  max_alt_ft INTEGER,
+  max_gs_kts REAL,
+  max_range_nm REAL,
+  mlat_pos INTEGER NOT NULL DEFAULT 0,
+  PRIMARY KEY (day, hex)
+);
+CREATE INDEX IF NOT EXISTS network_day_aircraft_hex ON network_day_aircraft(hex);
+CREATE TABLE IF NOT EXISTS network_enrichment (
+  hex TEXT PRIMARY KEY,
+  registration TEXT,
+  typecode TEXT,
+  description TEXT,
+  owner TEXT,
+  year TEXT,
+  updated_at REAL NOT NULL
+);
+```
+
+Ground contacts are not written to `network_day_aircraft` (their
+`max_alt_ft` would be NULL); they are still written to `network_enrichment`.
+This keeps the coverage metric about airborne aircraft.
+
+**`src/network.rs`:**
+
+- `#[derive(Deserialize)] struct V3Response { ac: Vec<V3Aircraft> }`.
+- `V3Aircraft` maps `r` -> `registration`, `t` -> `typecode`, `desc` ->
+  `description`, `ownOp` -> `owner`, `year` -> `year`, `alt_baro` -> `Alt`
+  (reuse `poller::Alt`), plus `hex`, `flight`, `gs`, `lat`, `lon`, `dst`,
+  `dir`, `seen`, `seen_pos`, `mlat`, `squawk`, `category`, `track`,
+  `baro_rate`.
+- `NetworkAircraft` is the normalized row: `hex`, `flight`, `registration`,
+  `typecode`, `description`, `owner`, `year`, `alt_ft`, `on_ground`,
+  `gs_kts`, `lat`, `lon`, `dst_nm`, `dir_deg`, `seen`, `mlat_pos`.
+- `NetworkView { fetched_at, ok, error, radius_nm, aircraft:
+  HashMap<String, NetworkAircraft>, recent: HashMap<String, f64>,
+  status: NetworkStatus }`.
+  `recent` is the 60 s rolling set: insert every airborne hex on each poll,
+  prune entries older than `LIVE_WINDOW_SECS`. It is what the coverage page
+  diffs, so a single poll that misses an aircraft does not create a false
+  "unique".
+- `static VIEW: LazyLock<RwLock<Arc<NetworkView>>>`; `pub fn latest() ->
+  Arc<NetworkView>` clones the Arc, not the map.
+- `pub async fn run(db: Db)`:
+  1. Read `stats::rx_pos()`; if none, log and return.
+  2. Loop: `GET {ADSB_FI_API}/v3/lat/{lat}/lon/{lon}/dist/{radius}` with
+     `User-Agent: plane-stats/0.1 (adsb.fi feeder)`, 10 s timeout.
+  3. On 200: normalize, update `VIEW` (replace the Arc), write
+     `network_day_aircraft` + `network_enrichment` in one transaction.
+  4. On 429: set `ok=false`, `error="rate limited"`, sleep 60 s.
+  5. On other errors: set `ok=false`, keep the last good `aircraft`/`recent`
+     so pages show stale data with a banner.
+  6. Every `FEEDER_CHECK_SECS`: `HEAD {ADSB_FI_API}/v2/snapshot`; record
+     `snapshot_ok`, `snapshot_at`, `snapshot_status`. HEAD is cheap and 200
+     proves the feeder IP is recognized. If HEAD ever returns 405, fall back
+     to a 5-minute GET and discard the body.
+  7. Every `NETWORK_STATS_SECS`: `GET {ADSB_FI_WEB_API}/v1/stats`; cache
+     `beast_feeders`, `mlat_feeders`, `total_aircraft`.
+  8. Every `NETWORK_COVERAGE_SECS`: `GET {ADSB_FI_WEB_API}/v1/coverage`;
+     count feeders within `radius + 50` NM; cache. These two are
+     undocumented website endpoints; failures are non-fatal.
+- `NetworkStatus` is serialized for `/api/feed`: `last_poll_at`, `ok`,
+  `error`, `aircraft`, `radius_nm`, `snapshot_ok`, `snapshot_at`,
+  `snapshot_status`, `totals`, `nearby_feeders`, `nearby_feeders_at`.
+- `pub(crate) fn distance_nm(lat1, lon1, lat2, lon2) -> f64` (haversine) for
+  the nearby-feeder count; unit-test one known pair.
+
+**Write path:** use `crate::db_lock(&db)` and a short transaction. Upsert
+`network_day_aircraft` with `day = stats::local_day(now)`, `first_ts`/`last_ts`,
+`polls + 1`, `MAX` alt/gs/range, `mlat_pos = MAX(...)`. Skip `on_ground`.
+Upsert `network_enrichment` with `coalesce` so a missing field never erases a
+known one.
+
+**Main:** `mod network;` and `tokio::spawn(network::run(db.clone()));` next to
+the poller and type task, after `set_rx_pos`.
+
+**Compose:** add the env above and mount the feed status file read-only:
+
+```yaml
+volumes:
+  - plane_stats_db:/data
+  - /run/adsbfi-feed:/run/adsbfi-feed:ro
+environment:
+  ADSB_FI_API: ${ADSB_FI_API:-https://opendata.adsb.fi/api}
+  NETWORK_RADIUS_NM: ${NETWORK_RADIUS_NM:-100}
+  NETWORK_POLL_SECS: ${NETWORK_POLL_SECS:-10}
+  FEED_JSON: /run/adsbfi-feed/aircraft.json
+```
+
+**Verify:** `docker logs -f plane-stats` shows `network poll ok: N aircraft`
+every 10 s and no 429; the HEAD check logs 200; `network_day_aircraft` has
+rows for today; `network_enrichment` has rows. Kill the network (bad
+`ADSB_FI_API` in a local run) and confirm the poller logs the error and keeps
+serving.
+
+**Commit:** `plane-stats: adsb.fi network poller and schema`
+
+### 8.1 Unique/missed coverage page
+
+**Goal:** `/coverage` shows, for the last 60 s, what only your receiver heard
+and what the network heard that you missed.
+
+**Files:** `src/stats.rs`, `src/web.rs`, new `templates/coverage.html`, new
+`templates/partials/coverage.html`, `templates/index.html` (nav),
+`static/app.css`.
+
+**Query (`stats::network_coverage(db, now)`):**
+
+- Local live:
+  `SELECT a.hex, a.last_flight, coalesce(nullif(e.registration,''), n.registration), coalesce(nullif(e.typecode,''), n.typecode), a.last_alt_ft, a.last_gs_kts, a.last_range_nm, a.last_lat, a.last_lon, a.last_seen FROM aircraft a LEFT JOIN enrichment e ON e.icao24 = a.hex LEFT JOIN network_enrichment n ON n.hex = a.hex WHERE a.last_seen > :cutoff AND (a.last_alt_ft IS NULL OR a.last_alt_ft > 0)`.
+- Network: `network::latest()`; use `recent` for membership and `aircraft`
+  for details; skip `on_ground`.
+- `overlap = local ∩ recent`; `unique = local - recent`; `missed = recent -
+  local`.
+- `CoverageRow { hex, flight, registration, typecode, alt_ft, gs_kts,
+  dst_nm, dir_deg, seen, mlat_pos, last_seen_local }` with
+  `map_url(base)`, `trace_url(base)`, `adsb_url()`.
+- `NetworkCoverage { fetched_at, age_secs, ok, error, stale, radius_nm,
+  local_count, network_count, overlap, unique, missed, unique_rows,
+  missed_rows }`.
+- `stale = !ok || age_secs > LIVE_WINDOW_SECS`. Stale keeps the last rows but
+  the template shows "last network poll Xs ago" and no "0 missed" claim.
+
+**Routes:** `/coverage` (page), `/partials/coverage` (10 s htmx refresh),
+`/api/coverage`.
+
+**Template:** hero "Coverage" + tagline "Local receiver vs adsb.fi within
+{{ radius }} NM"; a status line; five cards (local live, network, overlap,
+only you, missed); two tables:
+
+- "Only you saw" — hex, callsign, registration, type, alt, range, last seen,
+  map/trace.
+- "Network saw, you missed" — hex, callsign, registration, type, alt, range,
+  bearing, age, MLAT badge, adsb.fi link. No tar1090 link: the aircraft is
+  not in the local receiver's data.
+
+Empty states explain the 60 s window. Footer: "Network data: adsb.fi" link.
+
+**Nav:** add a Coverage pill to `index.html`, `today.html`, `activity.html`,
+`types.html`; the aircraft profile keeps its Dashboard link.
+
+**Verify:** at the same moment, `curl` v3 and
+`localhost:8080/data/aircraft.json` and compare counts; an aircraft in both
+must be overlap, not unique. Force a network error and confirm the banner/stale
+state. Check the 10 s partial refresh does not reset scroll.
+
+**Commit:** `plane-stats: unique/missed coverage page`
+
+### 8.2 Network enrichment fallback
+
+**Goal:** fill registration/type/owner/description/year from adsb.fi when
+OpenSky has no row or a blank field.
+
+**Files:** `src/stats.rs`, `templates/aircraft.html`, `README.md`.
+
+**Merge (`stats::enrichment_for`):**
+
+- Query `enrichment` as today; query `network_enrichment` by hex.
+- If both absent -> `None`.
+- If OpenSky present: `registration = e.registration.or(n.registration)`,
+  `typecode = e.typecode.or(n.typecode)`, `owner = e.owner.or(n.owner)`,
+  `built = e.built.or(n.year)`, `description = n.description`.
+- If OpenSky absent: return `Enrichment` with `registration`, `typecode`,
+  `owner`, `built = year`, `description`; other fields `None`.
+- Add `description: Option<String>` to `Enrichment`.
+
+**Fleet table:** in `COLS`, use
+`coalesce(nullif(e.registration,''), n.registration)` and
+`coalesce(nullif(e.typecode,''), n.typecode)`; add
+`LEFT JOIN network_enrichment n ON n.hex = a.hex` to `FROM`. The positional
+count and `row_to_aircraft` do not change. Add `n.registration`,
+`n.typecode`, `n.description`, `n.owner` to the search clause. Update
+`record()` the same way for the record cards.
+
+**Profile:** add a "Description" row to the Identity table; "Built" already
+renders `m.built`, which now carries the network year when OpenSky has none.
+
+**Type dex:** do not coalesce here yet. `TYPE_DEX_SQL` uses OpenSky's
+`typecode` as the rarity denominator; mixing network-only typecodes changes
+the meaning of `caught / registered`. Note it as a follow-up.
+
+**Verify:** pick a hex with no OpenSky row but a `network_enrichment` row;
+`/aircraft/<hex>` shows registration/type/owner/year. Pick a hex where OpenSky
+has a blank owner; the network owner appears. Search the fleet by the
+network-only owner/registration and confirm the row is found. Confirm OpenSky
+still wins when both exist.
+
+**Commit:** `plane-stats: network enrichment fallback`
+
+### 8.3 Feeder status card
+
+**Goal:** one panel that answers "is my feed alive and is adsb.fi seeing it?"
+
+**Files:** `src/stats.rs`, `src/web.rs`, new `templates/partials/feed.html`,
+`templates/index.html`, `static/app.css`, `README.md`.
+
+**Status (`stats::feeder_status(now)`):**
+
+- `feed`: read `FEED_JSON`; parse `{now, messages, aircraft}`; `age_secs` from
+  the file mtime (fallback `now - payload.now`); `aircraft_count`,
+  `messages`. Missing/unreadable -> `error`.
+- `network`: `network::latest().status` (last poll age, ok/error, aircraft
+  count, radius, snapshot 200, totals, nearby feeders).
+- `local_poller`: `last_poll_age(db, now)` (already exists).
+
+**Routes:** `/partials/feed`, `/api/feed`.
+
+**UI:** a "Feeder" panel on the dashboard after Summary:
+`<div id="feed" hx-get="/partials/feed" hx-trigger="load, every 30s"></div>`.
+The partial is a compact grid:
+
+- Feed client: `OK · N aircraft · M messages` or "status file missing".
+- Network API: `OK · N aircraft within R NM · Xs ago` or the error.
+- Feeder recognized: `yes · HEAD 200 · Xs ago` or "no".
+- Network totals: `7,479 feeders · 6,779 MLAT · 6,941 aircraft`.
+- Nearby feeders: `N within R+50 NM` (optional).
+
+All network values are cached by the poller; the partial does no network I/O.
+
+**Verify:** `curl -s localhost:8081/api/feed | python3 -m json.tool`; run with
+`FEED_JSON=/nonexistent` and confirm the "missing" state; force a bad API base
+and confirm the error state, not a blank card.
+
+**Commit:** `plane-stats: feeder status card`
+
+### 8.4 Daily digest network line
+
+**Goal:** `/today` says how much of the network's local traffic you covered.
+
+**Files:** `src/stats.rs`, `templates/today.html`, `README.md`.
+
+**Digest (`stats::today_summary`):** add a nested `NetworkDigest`:
+
+```rust
+pub struct NetworkDigest {
+    pub seen: i64,          // network_day_aircraft today (airborne)
+    pub local_seen: i64,    // day_aircraft today, max_alt_ft IS NOT NULL
+    pub only_network: i64,  // network - local
+    pub only_local: i64,    // local - network
+    pub overlap: i64,
+    pub cover_pct: Option<f64>, // overlap / seen
+    pub ok: bool,
+    pub age_secs: Option<f64>,
+    pub radius_nm: f64,
+}
+```
+
+Queries (all `WHERE day = ?1`):
+
+- `seen = COUNT(*) FROM network_day_aircraft`
+- `local_seen = COUNT(*) FROM day_aircraft WHERE max_alt_ft IS NOT NULL`
+- `only_network = network_day_aircraft LEFT JOIN day_aircraft ... WHERE d.hex IS NULL`
+- `only_local = day_aircraft LEFT JOIN network_day_aircraft ... WHERE n.hex IS NULL AND d.max_alt_ft IS NOT NULL`
+- `overlap = day_aircraft JOIN network_day_aircraft ... WHERE d.max_alt_ft IS NOT NULL`
+- `cover_pct = overlap * 100 / seen` when `seen > 0`, else `None`.
+- `ok = network::latest().status.ok && age_secs <= 60`; `radius_nm` from the
+  view.
+
+Ground contacts are already excluded by the 8.0 write path
+(`network_day_aircraft` skips `on_ground`); `day_aircraft.max_alt_ft` is NULL
+for ground, so the `max_alt_ft IS NOT NULL` filters keep the local side
+like-for-like.
+
+**Template:** add a fifth card to "At a glance":
+`{{ summary.network.seen }}` "network saw" with
+`{{ summary.network.local_seen }}` "you saw"
+(`{{ summary.network.cover_pct }}%` of the network) and
+`{{ only_local }} only you · {{ only_network }} only network`.
+If `!summary.network.ok`, show "network data unavailable" and omit the
+percentage. Add a footnote: "Within {{ radius }} NM; ground contacts excluded."
+
+**API:** `/api/today` gains `summary.network`.
+
+**Verify:** `curl -s localhost:8081/api/today | python3 -m json.tool`; check
+`only_local + overlap == network.local_seen` and
+`only_network + overlap == network.seen`. On a day with no network rows,
+`cover_pct` is `null` and the template says unavailable, not 0%.
+
+**Commit:** `plane-stats: daily digest network coverage`
+
+### 8.5 Docs, terms, rollout
+
+- `README.md`: add `/coverage`, `/api/coverage`, `/api/feed`; config table
+  rows; `network_day_aircraft` / `network_enrichment` data-model bullets;
+  "Network data: adsb.fi" citation.
+- `AGENTS.md`: add a "Network integration" subsection under plane-stats
+  status: v3 10 s, HEAD 35 s, stats 5 min, coverage 10 min, 1 req/s public /
+  1 req/30 s snapshot; ground contacts excluded; `network_day_aircraft`
+  starts at deploy; `FEED_JSON` mount.
+- `feeders/adsbfi/README.md`: note that plane-stats reads
+  `/run/adsbfi-feed/aircraft.json` and hosts `/coverage`.
+- Terms: every page that renders network data links <https://adsb.fi/>; the
+  poller sends a `plane-stats/0.1` User-Agent.
+
+**Rollout order:** 8.0 (foundation) -> 8.1 (coverage) -> 8.2 (enrichment) ->
+8.3 (feeder card) -> 8.4 (digest). Each is a separate build/verify/commit;
+8.1 is the highest-value surface, 8.2/8.3 are cheap, 8.4 depends on 8.0's
+day table.
+
+---
+
 ## Cross-cutting notes
 
 - **Positional columns:** `aircraft_sorted` reads `COLS` via `row_to_aircraft`.

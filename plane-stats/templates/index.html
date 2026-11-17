@@ -68,7 +68,7 @@
       <section class="glass panel" aria-label="Feeder">
         <h2>Feeder</h2>
         <div id="feed" hx-get="/partials/feed"
-             hx-trigger="load, every 30s [document.visibilityState === 'visible']">
+             hx-trigger="load, every 30s [document.visibilityState === 'visible' && !(document.activeElement && document.activeElement.closest('#feed'))]">
           {% include "partials/feed.html" %}
         </div>
       </section>

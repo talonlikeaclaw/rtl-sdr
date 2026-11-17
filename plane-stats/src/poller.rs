@@ -207,6 +207,14 @@ fn record_poll(db: &Db, now: f64, live: &[&Aircraft], messages: i64) -> rusqlite
                 None => None,
             };
             let flight = a.flight.as_deref().map(str::trim).filter(|s| !s.is_empty());
+            // readsb never emits `dbFlags` in this deployment (no `--db-file`),
+            // so derive the military bit from the ICAO ranges tar1090 uses as
+            // its own fallback. Other bits are left as-is when absent.
+            let db_flags = if crate::mil::is_military(&hex) {
+                Some(a.db_flags.unwrap_or(0) | 1)
+            } else {
+                a.db_flags
+            };
             stmt.execute(params![
                 hex.as_str(),
                 now,
@@ -226,7 +234,7 @@ fn record_poll(db: &Db, now: f64, live: &[&Aircraft], messages: i64) -> rusqlite
                 a.emergency,
                 last_alt_ft,
                 a.seen,
-                a.db_flags,
+                db_flags,
             ])?;
 
             day_aircraft.execute(params![day.as_str(), hex.as_str(), now, alt_ft, a.gs, a.r_dst])?;

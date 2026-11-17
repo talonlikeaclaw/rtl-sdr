@@ -2,7 +2,9 @@ use std::sync::{Arc, Mutex};
 
 use rusqlite::{Connection, OptionalExtension};
 
+mod dbflags;
 mod enrichment;
+mod mil;
 mod network;
 mod poller;
 mod stats;
@@ -232,6 +234,33 @@ fn main() {
         .expect("backfill poll_hour");
     }
 
+    // The readsb image never emits `dbFlags` (it runs without `--db-file`), so
+    // the military bit is derived from ICAO ranges in the poller. Backfill the
+    // rows recorded before that fallback existed; bump the key if `mil::RANGES`
+    // changes.
+    let mil_backfilled = conn
+        .query_row("SELECT 1 FROM enrichment_meta WHERE key = 'mil_ranges_v1'", [], |_| Ok(()))
+        .optional()
+        .expect("mil_ranges meta")
+        .is_some();
+    if !mil_backfilled {
+        let tx = conn.unchecked_transaction().expect("mil backfill tx");
+        for &(lo, hi) in mil::RANGES {
+            tx.execute(
+                "UPDATE aircraft SET db_flags = coalesce(db_flags, 0) | 1
+                 WHERE hex BETWEEN ?1 AND ?2",
+                rusqlite::params![format!("{lo:06x}"), format!("{hi:06x}")],
+            )
+            .expect("backfill military flags");
+        }
+        tx.execute(
+            "INSERT OR REPLACE INTO enrichment_meta (key, value) VALUES ('mil_ranges_v1', '1')",
+            [],
+        )
+        .expect("mil_ranges meta");
+        tx.commit().expect("mil backfill commit");
+    }
+
     let db: Db = Arc::new(Mutex::new(conn));
 
     match (
@@ -248,6 +277,14 @@ fn main() {
             tracing::info!("enrichment unchanged ({n} rows), skipping reload")
         }
         Err(e) => tracing::warn!("enrichment load failed: {e}"),
+    }
+
+    // The live readsb only flags aircraft it hears after loading its DB, so
+    // backfill military/interesting/PIA/LADD for rows already in the ledger.
+    match dbflags::backfill(&db) {
+        Ok(0) => {}
+        Ok(n) => tracing::info!("tar1090 flags backfilled on {n} aircraft"),
+        Err(e) => tracing::warn!("tar1090 flag backfill failed: {e}"),
     }
 
     // The 520k-row enrichment insert leaves a WAL as large as the database.

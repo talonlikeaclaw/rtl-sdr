@@ -45,6 +45,10 @@ services:
     depends_on: [readsb]
     tmpfs:
       - /run:exec,size=256M
+    volumes:
+      # Heatmap, traces and the coverage/radar outline. Without this the data
+      # lives in the container layer and every recreate wipes it.
+      - tar1090_globe_history:/var/globe_history
     ports:
       - "8080:80"
     environment:
@@ -52,6 +56,10 @@ services:
       BEASTHOST: readsb
       LAT: ${READSB_LAT}
       LONG: ${READSB_LON}
+      # Load tar1090-db's aircraft.csv.gz into the internal readsb. Without it
+      # readsb emits no `dbFlags` at all (military/interesting/PIA/LADD), and
+      # plane-stats' flag chips stay empty.
+      TAR1090_ENABLE_AC_DB: "true"
 
   plane-stats:
     profiles: [adsb]
@@ -85,3 +93,4 @@ volumes:
   readsb_rrd:
   readsb_autogain:
   plane_stats_db:
+  tar1090_globe_history:
