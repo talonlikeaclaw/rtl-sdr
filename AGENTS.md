@@ -176,6 +176,23 @@ Daily ledger (`day_aircraft`) and `/today`:
   sums the positive per-poll deltas (`LAG`) instead of `SUM(messages)`; never
   sum the raw column.
 
+### Network integration
+
+`src/network.rs` polls adsb.fi in the background; every page renders without it.
+
+- v3 radius poll every 10 s (`NETWORK_POLL_SECS`), 100 NM
+  (`NETWORK_RADIUS_NM`, clamp 10–250), 1 req/s public limit. `HEAD
+  /v2/snapshot` every 35 s (405 falls back to a 5-minute GET), `/v1/stats`
+  every 5 min, `/v1/coverage` every 10 min.
+- `network_day_aircraft` skips `on_ground`; `network_enrichment` keeps ground
+  contacts. Both start at deploy — no backfill from `visits`.
+- `/coverage` diffs a 60 s rolling network set (`recent`) against local
+  `aircraft.last_seen`, so one missed poll cannot create a false "unique".
+- `FEED_JSON` (`/run/adsbfi-feed/aircraft.json`) is mounted read-only from the
+  host feeder; the dashboard Feeder card is the only reader.
+- Lock order: `network::latest()` before `db_lock`; `update_view` before the
+  network DB write.
+
 Activity (`/activity`, `/api/activity`):
 
 - `weekday_hour_heatmap` groups the `poll_hour` rollup into 7×24 local

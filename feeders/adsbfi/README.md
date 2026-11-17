@@ -62,6 +62,10 @@ public IP with a feed:
 curl -s -o /dev/null -w '%{http_code}\n' https://opendata.adsb.fi/api/v2/snapshot
 ```
 
+`plane-stats` reads `/run/adsbfi-feed/aircraft.json` (read-only mount) for its
+Feeder card and hosts `/coverage`, which compares the local receiver with
+adsb.fi within 100 NM.
+
 ## Config
 
 `/etc/default/adsbfi` is owned by the installer. `adsbfi.env.example` mirrors

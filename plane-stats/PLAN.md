@@ -329,3 +329,8 @@ Planespotters image bytes are stored.
 | 5. `day_aircraft` + `/today` | done | `plane-stats: daily ledger and /today digest` |
 | 6. Heatmap + range history | done | `plane-stats: activity heatmap and range history` |
 | 7. Type dex | done | — |
+| 8a. Network poller + schema | done | `plane-stats: adsb.fi network poller and schema` |
+| 8b. Unique/missed coverage page | done | `plane-stats: unique/missed coverage page` |
+| 8c. Network enrichment fallback | done | `plane-stats: network enrichment fallback` |
+| 8d. Feeder status card | done | `plane-stats: feeder status card` |
+| 8e. Daily digest network coverage | done | `plane-stats: daily digest network coverage` |

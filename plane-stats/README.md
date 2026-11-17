@@ -6,7 +6,7 @@ Rust service (axum + tokio + rusqlite) polls tar1090's `aircraft.json` every
 JSON API on port **8081**.
 
 Part of the `sdr` Docker Compose project; runs under the `adsb` profile next to
-readsb and tar1090. Only the poller writes to the database.
+readsb and tar1090. The local and network pollers are the only writers.
 
 ## Pages
 
@@ -15,6 +15,7 @@ readsb and tar1090. Only the poller writes to the database.
 | `/`              | Fleet table: search, sort, filter chips, pagination (100/page), live "overhead now" panel, summary cards               |
 | `/aircraft/:hex` | Aircraft profile: visits, callsigns, records, registration/type enrichment, emergency history, tar1090 map/trace links |
 | `/today`         | Daily digest: unique/new aircraft, hour histogram, records vs prior days                                               |
+| `/coverage`      | Local receiver vs adsb.fi within 100 NM: overlap, only-you, missed                                                     |
 | `/activity`      | 7×24 weekday/hour heatmap, range-by-day and messages-by-day charts                                                     |
 | `/types`         | Type dex: every ICAO type designator heard, with photo and catch stats                                                 |
 | `/type/:code`    | Type profile: ICAO Doc 8643 specs, Wikipedia extract/photo, Wikidata facts, airframes seen                             |
@@ -33,11 +34,13 @@ All endpoints return JSON and are read-only.
 | `/api/live`                     | Aircraft heard in the last 60 s                      |
 | `/api/emergencies`              | Emergency squawk log                                 |
 | `/api/today`                    | `{summary, hours, records, new}`                     |
+| `/api/coverage`                 | Local vs network live sets                           |
+| `/api/feed`                     | Feeder client, network API and snapshot status       |
 | `/api/activity`                 | Heatmap and chart series                             |
 | `/api/types`, `/api/type/:code` | Type dex and one designator                          |
 | `/api/stats`                    | All-time aggregates (uncached; UI uses a 10 s cache) |
 
-HTMX partials live under `/partials/{table,table/rows,cards,emergencies,live}`.
+HTMX partials live under `/partials/{table,table/rows,cards,emergencies,live,coverage,feed}`.
 
 ## Run it
 
@@ -64,7 +67,15 @@ docker logs --tail 20 plane-stats
 | `AIRCRAFT_JSON_URL` | `http://tar1090:80/data/aircraft.json`        | Poll source                                                |
 | `ENRICHMENT_CSV`    | `/usr/share/plane-stats/aircraftDatabase.csv` | OpenSky metadata CSV, baked into the image                 |
 | `TAR1090_URL`       | derived from request `Host` (:8080)           | Browser-facing tar1090 base for deep links                 |
-| `RX_LAT`, `RX_LON`  | unset                                         | Receiver position; enables the live panel's bearing column |
+| `RX_LAT`, `RX_LON`  | unset                                         | Receiver position; enables the live panel's bearing column and network poller |
+| `ADSB_FI_API`       | `https://opendata.adsb.fi/api`                | adsb.fi v3 aircraft/snapshot API base                      |
+| `ADSB_FI_WEB_API`   | `https://api.adsb.fi`                         | adsb.fi stats/coverage API base                            |
+| `NETWORK_RADIUS_NM` | `100`                                         | Network comparison radius, clamped 10–250 NM               |
+| `NETWORK_POLL_SECS` | `10`                                          | v3 aircraft poll interval (minimum 5 s)                    |
+| `FEEDER_CHECK_SECS` | `35`                                          | Feeder snapshot check interval (minimum 10 s)              |
+| `NETWORK_STATS_SECS`| `300`                                         | Network totals refresh interval (minimum 60 s)             |
+| `NETWORK_COVERAGE_SECS` | `600`                                     | Nearby-feeder coverage refresh interval (minimum 60 s)     |
+| `FEED_JSON`         | `/run/adsbfi-feed/aircraft.json`              | Host feeder status file, mounted read-only                 |
 | `TZ`                | container default                             | Local day/hour bucketing (`chrono::Local`)                 |
 | `RUST_LOG`          | `plane_stats=info`                            | Log filter                                                 |
 
@@ -84,6 +95,9 @@ are additive via `NEW_COLUMNS` in `src/main.rs`.
   pruned at 90 days.
 - `day_aircraft` — per local day per hex: first/last seen, polls, max
   altitude/speed/range. Never pruned.
+- `network_day_aircraft` — per local day per hex from adsb.fi, airborne only:
+  first/last seen, polls, max altitude/speed/range, MLAT flag. Never pruned.
+- `network_enrichment` — adsb.fi registration/type/description/owner/year cache.
 - `enrichment` — OpenSky registration/type/owner data (~520k rows), plus
   `enrichment_meta` stamps for the CSV and background-task TTLs.
 - `emergency_log` — squawk/emergency events.
@@ -92,6 +106,9 @@ are additive via `NEW_COLUMNS` in `src/main.rs`.
 
 `aircraft` and `visits` are never pruned. The database lives on the named
 volume `sdr_plane_stats_db`.
+
+Network data comes from [adsb.fi](https://adsb.fi/); the poller sends
+`plane-stats/0.1 (adsb.fi feeder)` and stays within the public 1 req/s limit.
 
 ### Enrichment reload
 
