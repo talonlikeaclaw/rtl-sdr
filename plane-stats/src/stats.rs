@@ -255,9 +255,11 @@ const COLS: &str = "a.hex, a.first_seen, a.last_seen, a.sightings, a.last_flight
                     a.last_category, a.max_alt_ft, a.max_gs_kts, a.max_range_nm, a.max_rssi_dbfs, \
                     a.last_lat, a.last_lon, a.last_track, a.max_baro_rate, a.min_baro_rate, \
                     a.last_nav_alt_ft, a.last_nav_heading, a.last_emergency, \
-                    e.registration, e.typecode, \
+                    coalesce(nullif(e.registration,''), n.registration), \
+                    coalesce(nullif(e.typecode,''), n.typecode), \
                     a.last_alt_ft, a.last_gs_kts, a.last_range_nm, a.last_baro_rate, a.last_msg_age";
-const FROM: &str = "FROM aircraft a LEFT JOIN enrichment e ON e.icao24 = a.hex";
+const FROM: &str = "FROM aircraft a LEFT JOIN enrichment e ON e.icao24 = a.hex \
+                    LEFT JOIN network_enrichment n ON n.hex = a.hex";
 
 /// Sort keys accepted from the query string.
 const SORT_KEYS: &[&str] = &[
@@ -289,8 +291,8 @@ pub fn sort_column(sort: &str) -> (&'static str, &'static str) {
         "max_alt_ft" => ("a.max_alt_ft", "desc"),
         "max_gs_kts" => ("a.max_gs_kts", "desc"),
         "max_range_nm" => ("a.max_range_nm", "desc"),
-        "registration" => ("e.registration", "asc"),
-        "typecode" => ("e.typecode", "asc"),
+        "registration" => ("coalesce(nullif(e.registration,''), n.registration)", "asc"),
+        "typecode" => ("coalesce(nullif(e.typecode,''), n.typecode)", "asc"),
         _ => ("a.last_seen", "desc"),
     }
 }
@@ -432,7 +434,11 @@ impl FleetFilter {
                 "(a.hex LIKE :q ESCAPE '\\' OR a.last_flight LIKE :q ESCAPE '\\'
                   OR e.registration LIKE :q ESCAPE '\\' OR e.model LIKE :q ESCAPE '\\'
                   OR e.typecode LIKE :q ESCAPE '\\'
-                  OR e.owner LIKE :q ESCAPE '\\' OR e.operator LIKE :q ESCAPE '\\')",
+                  OR e.owner LIKE :q ESCAPE '\\' OR e.operator LIKE :q ESCAPE '\\'
+                  OR n.registration LIKE :q ESCAPE '\\'
+                  OR n.typecode LIKE :q ESCAPE '\\'
+                  OR n.description LIKE :q ESCAPE '\\'
+                  OR n.owner LIKE :q ESCAPE '\\')",
             );
             params.push((":q", Value::Text(fleet_needle(&self.q))));
         }
@@ -1338,8 +1344,13 @@ fn record(conn: &Connection, what: &str) -> rusqlite::Result<Option<Record>> {
         _ => unreachable!(),
     };
     let sql = format!(
-        "SELECT a.hex, {col}, e.registration, e.typecode, a.last_flight
-         FROM aircraft a LEFT JOIN enrichment e ON e.icao24 = a.hex
+        "SELECT a.hex, {col},
+                coalesce(nullif(e.registration,''), n.registration),
+                coalesce(nullif(e.typecode,''), n.typecode),
+                a.last_flight
+         FROM aircraft a
+         LEFT JOIN enrichment e ON e.icao24 = a.hex
+         LEFT JOIN network_enrichment n ON n.hex = a.hex
          WHERE {col} IS NOT NULL ORDER BY {col} DESC LIMIT 1"
     );
     conn.query_row(&sql, [], |r| {
@@ -1453,8 +1464,13 @@ pub fn stats(db: &Db, now: f64) -> rusqlite::Result<Stats> {
 
     let top_airframe: Option<Record> = conn
         .query_row(
-            "SELECT a.hex, a.sightings, e.registration, e.typecode, a.last_flight
-             FROM aircraft a LEFT JOIN enrichment e ON e.icao24 = a.hex
+            "SELECT a.hex, a.sightings,
+                    coalesce(nullif(e.registration,''), n.registration),
+                    coalesce(nullif(e.typecode,''), n.typecode),
+                    a.last_flight
+             FROM aircraft a
+             LEFT JOIN enrichment e ON e.icao24 = a.hex
+             LEFT JOIN network_enrichment n ON n.hex = a.hex
              ORDER BY a.sightings DESC LIMIT 1",
             [],
             |r| {
@@ -1809,7 +1825,7 @@ pub fn network_coverage(db: &Db, now: f64) -> rusqlite::Result<NetworkCoverage> 
     })
 }
 
-#[derive(Debug, serde::Serialize)]
+#[derive(Debug, Default, serde::Serialize)]
 pub struct Enrichment {
     pub registration: Option<String>,
     pub manufacturer: Option<String>,
@@ -1828,40 +1844,90 @@ pub struct Enrichment {
     pub engines: Option<String>,
     pub notes: Option<String>,
     pub categorydescription: Option<String>,
+    pub description: Option<String>,
+    /// True when `network_enrichment` contributed any field.
+    pub network: bool,
+}
+
+fn nonblank(v: Option<String>) -> Option<String> {
+    v.map(|s| s.trim().to_string()).filter(|s| !s.is_empty())
 }
 
 pub fn enrichment_for(db: &Db, hex: &str) -> rusqlite::Result<Option<Enrichment>> {
     let conn = crate::db_lock(db);
-    conn.query_row(
-        "SELECT registration, manufacturer, model, typecode, owner, operator,
-                serialnumber, icaoaircrafttype, operatorcallsign,
-                registered, reguntil, status, built, firstflightdate, engines, notes,
-                categorydescription
-         FROM enrichment WHERE icao24 = ?1",
-        params![hex],
-        |r| {
-            Ok(Enrichment {
-                registration: r.get(0)?,
-                manufacturer: r.get(1)?,
-                model: r.get(2)?,
-                typecode: r.get(3)?,
-                owner: r.get(4)?,
-                operator: r.get(5)?,
-                serialnumber: r.get(6)?,
-                icaoaircrafttype: r.get(7)?,
-                operatorcallsign: r.get(8)?,
-                registered: r.get(9)?,
-                reguntil: r.get(10)?,
-                status: r.get(11)?,
-                built: r.get(12)?,
-                firstflightdate: r.get(13)?,
-                engines: r.get(14)?,
-                notes: r.get(15)?,
-                categorydescription: r.get(16)?,
-            })
-        },
-    )
-    .optional()
+    let sky = conn
+        .query_row(
+            "SELECT registration, manufacturer, model, typecode, owner, operator,
+                    serialnumber, icaoaircrafttype, operatorcallsign,
+                    registered, reguntil, status, built, firstflightdate, engines, notes,
+                    categorydescription
+             FROM enrichment WHERE icao24 = ?1",
+            params![hex],
+            |r| {
+                Ok(Enrichment {
+                    registration: r.get(0)?,
+                    manufacturer: r.get(1)?,
+                    model: r.get(2)?,
+                    typecode: r.get(3)?,
+                    owner: r.get(4)?,
+                    operator: r.get(5)?,
+                    serialnumber: r.get(6)?,
+                    icaoaircrafttype: r.get(7)?,
+                    operatorcallsign: r.get(8)?,
+                    registered: r.get(9)?,
+                    reguntil: r.get(10)?,
+                    status: r.get(11)?,
+                    built: r.get(12)?,
+                    firstflightdate: r.get(13)?,
+                    engines: r.get(14)?,
+                    notes: r.get(15)?,
+                    categorydescription: r.get(16)?,
+                    description: None,
+                    network: false,
+                })
+            },
+        )
+        .optional()?;
+
+    let net: Option<(
+        Option<String>,
+        Option<String>,
+        Option<String>,
+        Option<String>,
+        Option<String>,
+    )> = conn
+        .query_row(
+            "SELECT registration, typecode, description, owner, year
+             FROM network_enrichment WHERE hex = ?1",
+            params![hex],
+            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?)),
+        )
+        .optional()?;
+
+    match (sky, net) {
+        (None, None) => Ok(None),
+        (Some(e), None) => Ok(Some(e)),
+        (None, Some((registration, typecode, description, owner, year))) => {
+            Ok(Some(Enrichment {
+                registration: nonblank(registration),
+                typecode: nonblank(typecode),
+                description: nonblank(description),
+                owner: nonblank(owner),
+                built: nonblank(year),
+                network: true,
+                ..Default::default()
+            }))
+        }
+        (Some(mut e), Some((registration, typecode, description, owner, year))) => {
+            e.registration = nonblank(e.registration).or(nonblank(registration));
+            e.typecode = nonblank(e.typecode).or(nonblank(typecode));
+            e.owner = nonblank(e.owner).or(nonblank(owner));
+            e.built = nonblank(e.built).or(nonblank(year));
+            e.description = nonblank(description);
+            e.network = true;
+            Ok(Some(e))
+        }
+    }
 }
 
 /// One row of the type dex: a designator seen on the air, its ICAO Doc 8643

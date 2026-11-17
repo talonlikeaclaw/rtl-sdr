@@ -54,6 +54,9 @@
               <tr><th>Registration</th><td class="mono">{{ row.registration.as_deref().unwrap_or("-") }}</td></tr>
               {% if let Some(m) = enrich %}
               <tr><th>Model</th><td>{{ m.model.as_deref().unwrap_or("-") }}{% if let Some(tc) = m.typecode %}{% if let Some(u) = row.type_url() %} (<a href="{{ u }}">{{ tc }}</a>){% else %} ({{ tc }}){% endif %}{% endif %}</td></tr>
+              {% if let Some(d) = m.description %}
+              <tr><th>Description</th><td>{{ d }}</td></tr>
+              {% endif %}
               <tr><th>Manufacturer</th><td>{{ m.manufacturer.as_deref().unwrap_or("-") }}</td></tr>
               <tr><th>Owner</th><td>{{ m.owner.as_deref().unwrap_or("-") }}</td></tr>
               <tr><th>Operator</th><td>{{ m.operator.as_deref().unwrap_or("-") }}</td></tr>
@@ -77,6 +80,9 @@
             </tbody>
           </table>
         </div>
+        {% if let Some(m) = enrich %}{% if m.network %}
+        <p class="type-credit">Registration data: OpenSky + <a href="https://adsb.fi/" target="_blank" rel="noopener">adsb.fi</a></p>
+        {% endif %}{% endif %}
       </section>
 
       <section class="glass panel" aria-label="Records">
