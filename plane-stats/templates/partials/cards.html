@@ -30,7 +30,7 @@
     <div class="card">
       <div class="num">{{ stats.types_seen }}</div>
       <div class="sub">types caught</div>
-      <div class="who">{% if let Some(r) = stats.top_type %}top {{ r.hex }} · {{ r.value_str() }} aircraft · {% endif %}<a href="/types">dex →</a></div>
+      <div class="who">{% if let Some(r) = stats.top_type %}top {% if let Some(u) = r.type_url() %}<a href="{{ u }}">{{ r.hex }}</a>{% else %}{{ r.hex }}{% endif %} · {{ r.value_str() }} aircraft · {% endif %}<a href="/types">dex →</a></div>
     </div>
     <div class="card">
       <div class="num">{% if let Some(r) = stats.top_airframe %}{{ r.value_str() }} <span class="unit">polls</span>{% else %}-{% endif %}</div>

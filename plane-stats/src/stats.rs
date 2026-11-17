@@ -61,6 +61,13 @@ pub struct AircraftRow {
     pub last_msg_age: Option<f64>,
 }
 
+/// ICAO type designators are two to four alphanumeric characters. Shared by
+/// the `/type/:code` route and every row that links to it, so a row can never
+/// render a link the route would reject.
+pub fn valid_designator(code: &str) -> bool {
+    (2..=4).contains(&code.len()) && code.bytes().all(|b| b.is_ascii_alphanumeric())
+}
+
 fn row_to_aircraft(r: &Row) -> rusqlite::Result<AircraftRow> {
     Ok(AircraftRow {
         hex: r.get(0)?,
@@ -140,6 +147,15 @@ impl AircraftRow {
     /// tar1090 deep link that shows this aircraft's track history.
     pub fn trace_url(&self, base: &str) -> String {
         format!("{base}/?showTrace={}", self.hex)
+    }
+    /// The type designator as displayed, or `-`.
+    pub fn type_code(&self) -> &str {
+        self.typecode.as_deref().unwrap_or("-")
+    }
+    /// Deep link to this aircraft's type page. OpenSky's `typecode` is free
+    /// text, so link only when the dex route would accept the code.
+    pub fn type_url(&self) -> Option<String> {
+        self.typecode.as_deref().filter(|t| valid_designator(t)).map(|t| format!("/type/{t}"))
     }
     pub fn alt_str(&self) -> String {
         self.last_alt_ft.map(|v| v.to_string()).unwrap_or_else(|| "-".into())
@@ -226,6 +242,10 @@ impl Record {
             (None, Some(t)) => t.clone(),
             (None, None) => self.hex.clone(),
         }
+    }
+    /// `/type/<code>` — only `top_type` stores a designator in `hex`.
+    pub fn type_url(&self) -> Option<String> {
+        valid_designator(&self.hex).then(|| format!("/type/{}", self.hex))
     }
 }
 
@@ -2005,5 +2025,22 @@ mod tests {
         assert_eq!(super::descent_str(Some(-1408)), "1408");
         assert_eq!(super::descent_str(Some(0)), "0");
         assert_eq!(super::descent_str(None), "-");
+    }
+
+    /// OpenSky's `typecode` is free text. A row must link only when the
+    /// `/type/:code` route would accept the code, or the dashboard ships
+    /// dead links.
+    #[test]
+    fn type_links_only_where_the_dex_route_accepts_the_code() {
+        for ok in ["B738", "C172", "A20N", "E75L"] {
+            assert!(super::valid_designator(ok), "{ok}");
+        }
+        for bad in ["", "B", "B7380", "B 38", "B-38", "B738!"] {
+            assert!(!super::valid_designator(bad), "{bad}");
+        }
+        let valid = super::Record { hex: "B738".into(), ..Default::default() };
+        assert_eq!(valid.type_url().as_deref(), Some("/type/B738"));
+        let invalid = super::Record { hex: "B7380".into(), ..Default::default() };
+        assert_eq!(invalid.type_url(), None);
     }
 }

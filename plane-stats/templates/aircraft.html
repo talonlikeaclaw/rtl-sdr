@@ -27,7 +27,7 @@
         <div>
           <h1><span class="mono">{{ row.hex }}</span>{% if let Some(r) = row.registration %} · {{ r }}{% endif %}</h1>
           <p class="tagline">
-            {% if let Some(m) = enrich %}{% if let Some(model) = m.model %}{{ model }}{% if let Some(tc) = m.typecode %} ({{ tc }}){% endif %} · {% endif %}{% if let Some(mf) = m.manufacturer %}{{ mf }} · {% endif %}{% endif %}Aircraft profile
+            {% if let Some(m) = enrich %}{% if let Some(model) = m.model %}{{ model }}{% if let Some(tc) = m.typecode %}{% if let Some(u) = row.type_url() %} (<a href="{{ u }}">{{ tc }}</a>){% else %} ({{ tc }}){% endif %}{% endif %} · {% endif %}{% if let Some(mf) = m.manufacturer %}{{ mf }} · {% endif %}{% endif %}Aircraft profile
           </p>
         </div>
       </div>
@@ -38,6 +38,7 @@
         <a class="pill" href="{{ row.trace_url(tar1090.as_str()) }}" target="_blank" rel="noopener">Show trace</a>
         {% endif %}
         <a class="pill" href="/">← Dashboard</a>
+        {% if let Some(u) = row.type_url() %}<a class="pill" href="{{ u }}">Type {{ row.type_code() }}</a>{% endif %}
         <a class="pill" href="/types">Type dex</a>
       </nav>
     </header>
@@ -52,7 +53,7 @@
               {% if row.registration.is_some() || enrich.is_some() %}
               <tr><th>Registration</th><td class="mono">{{ row.registration.as_deref().unwrap_or("-") }}</td></tr>
               {% if let Some(m) = enrich %}
-              <tr><th>Model</th><td>{{ m.model.as_deref().unwrap_or("-") }}{% if let Some(tc) = m.typecode %} ({{ tc }}){% endif %}</td></tr>
+              <tr><th>Model</th><td>{{ m.model.as_deref().unwrap_or("-") }}{% if let Some(tc) = m.typecode %}{% if let Some(u) = row.type_url() %} (<a href="{{ u }}">{{ tc }}</a>){% else %} ({{ tc }}){% endif %}{% endif %}</td></tr>
               <tr><th>Manufacturer</th><td>{{ m.manufacturer.as_deref().unwrap_or("-") }}</td></tr>
               <tr><th>Owner</th><td>{{ m.owner.as_deref().unwrap_or("-") }}</td></tr>
               <tr><th>Operator</th><td>{{ m.operator.as_deref().unwrap_or("-") }}</td></tr>

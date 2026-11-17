@@ -189,7 +189,14 @@ Type dex (`/types`, `/type/:code`, `/api/types`, `/api/type/:code`):
   subquery cheap.
 - `TypeDexRow` lives in `stats.rs`; `type_dex`, `type_detail`, and
   `type_dex_summary` back the pages. A designator is accepted only as 2–4
-  alphanumerics, upper-cased before lookup.
+  alphanumerics (`stats::valid_designator`, shared by the route and the links),
+  upper-cased before lookup.
+- Every designator the UI renders links to `/type/:code`: the fleet table, the
+  live panel, the dashboard "types caught" card and recent arrivals, `/today`'s
+  new list, and the aircraft profile (tagline, Model row, hero pill). Rows go
+  through `AircraftRow::type_url()` / `Record::type_url()`, which return `None`
+  for a free-text OpenSky `typecode` the route would 404. The type page links
+  back to the fleet with `/?q=<code>` (the fleet search matches `typecode`).
 - Photos are Wikipedia thumbnails (CC BY-SA; the card links the article). No
   Planespotters: its terms forbid storing/re-hosting images and it has no type
   endpoint.

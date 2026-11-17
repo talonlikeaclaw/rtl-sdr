@@ -190,18 +190,19 @@
           <table>
             <caption class="sr-only">Aircraft heard for the first time, most recent first</caption>
             <thead>
-              <tr><th scope="col">Hex</th><th scope="col">Callsign</th><th scope="col">First seen</th></tr>
+              <tr><th scope="col">Hex</th><th scope="col">Callsign</th><th scope="col">Type</th><th scope="col">First seen</th></tr>
             </thead>
             <tbody>
               {% for a in recent %}
               <tr>
                 <td class="hex"><a href="/aircraft/{{ a.hex }}">{{ a.hex }}</a></td>
                 <td>{% if let Some(v) = a.last_flight %}{{ v }}{% else %}-{% endif %}</td>
+                <td class="mono">{% if let Some(u) = a.type_url() %}<a href="{{ u }}">{{ a.type_code() }}</a>{% else %}{{ a.type_code() }}{% endif %}</td>
                 <td>{{ a.first_seen_str() }}</td>
               </tr>
               {% endfor %}
               {% if recent.is_empty() %}
-              <tr><td colspan="3" class="empty-row">No aircraft recorded yet. The first arrival appears here once the poller has heard it.</td></tr>
+              <tr><td colspan="4" class="empty-row">No aircraft recorded yet. The first arrival appears here once the poller has heard it.</td></tr>
               {% endif %}
             </tbody>
           </table>

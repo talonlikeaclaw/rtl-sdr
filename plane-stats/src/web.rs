@@ -616,12 +616,6 @@ async fn types_page(
     ))
 }
 
-/// ICAO type designators are two to four alphanumeric characters. Reject
-/// anything else before it reaches the database or an error page.
-fn valid_type_code(code: &str) -> bool {
-    (2..=4).contains(&code.len()) && code.bytes().all(|b| b.is_ascii_alphanumeric())
-}
-
 #[derive(Template)]
 #[template(path = "type.html")]
 struct TypeTemplate {
@@ -635,7 +629,7 @@ async fn type_page(
     headers: HeaderMap,
 ) -> Result<Response, AppError> {
     let code = code.to_uppercase();
-    if !valid_type_code(&code) {
+    if !stats::valid_designator(&code) {
         let body = ErrorTemplate {
             title: "Not in the type dex",
             message: "That is not an ICAO type designator.".to_string(),
@@ -667,7 +661,7 @@ async fn api_type(
     axum::extract::Path(code): axum::extract::Path<String>,
 ) -> Result<Json, ApiError> {
     let code = code.to_uppercase();
-    if !valid_type_code(&code) {
+    if !stats::valid_designator(&code) {
         return Err(ApiError(AppError::new(StatusCode::NOT_FOUND, "not an ICAO type designator")));
     }
     let Some(detail) = stats::type_detail(&db, &code)? else {

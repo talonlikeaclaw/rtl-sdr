@@ -54,6 +54,9 @@ Built and working:
   operators). `aircraft_types` + `type_wiki_map`; `types::run` refreshes Doc
   8643 monthly, the Wikipedia designator map weekly, and profiles monthly in
   batched requests. `/api/types`, `/api/type/:code`.
+- Type links: every rendered designator (fleet, live panel, dashboard cards
+  and recent arrivals, `/today`, aircraft profile) links to `/type/:code`;
+  the type page links back to `/?q=<code>`.
 
 Refresh model (60 s tbody-only tick, `hx-sync`, `poll_hour` rollup, cached
 `stats()`) is documented in `AGENTS.md` under "plane-stats status".

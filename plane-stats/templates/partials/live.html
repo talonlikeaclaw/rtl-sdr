@@ -23,7 +23,7 @@
     {% for a in live %}
     <tr>
       <td><a href="/aircraft/{{ a.hex }}">{% if let Some(cs) = a.last_flight %}{{ cs }}{% else %}{{ a.hex }}{% endif %}</a></td>
-      <td class="mono">{% if let Some(v) = a.typecode %}{{ v }}{% else %}-{% endif %}</td>
+      <td class="mono">{% if let Some(u) = a.type_url() %}<a href="{{ u }}" title="Open the {{ a.type_code() }} type page">{{ a.type_code() }}</a>{% else %}{{ a.type_code() }}{% endif %}</td>
       <td>{{ a.alt_str() }}</td>
       <td>{{ a.gs_str() }}</td>
       <td>{{ a.climb_str() }}</td>
