@@ -17,6 +17,9 @@ pub fn router(db: Db) -> Router {
     Router::new()
         .route("/", get(index))
         .route("/today", get(today_page))
+        .route("/coverage", get(coverage_page))
+        .route("/partials/coverage", get(coverage_partial))
+        .route("/api/coverage", get(api_coverage))
         .route("/activity", get(activity_page))
         .route("/types", get(types_page))
         .route("/type/:code", get(type_page))
@@ -562,6 +565,44 @@ async fn activity_page(State(db): State<Db>, headers: HeaderMap) -> Result<Html<
 
 async fn api_activity(State(db): State<Db>) -> Result<Json, ApiError> {
     Ok(Json(serde_json::to_value(stats::activity(&db, now())?)?))
+}
+
+#[derive(Template)]
+#[template(path = "coverage.html")]
+struct CoverageTemplate {
+    coverage: stats::NetworkCoverage,
+    tar1090: String,
+}
+
+async fn coverage_page(State(db): State<Db>, headers: HeaderMap) -> Result<Html<String>, AppError> {
+    Ok(Html(
+        CoverageTemplate {
+            coverage: stats::network_coverage(&db, now())?,
+            tar1090: tar1090_base(&headers),
+        }
+        .render()?,
+    ))
+}
+
+#[derive(Template)]
+#[template(path = "partials/coverage.html")]
+struct CoveragePartial {
+    coverage: stats::NetworkCoverage,
+    tar1090: String,
+}
+
+async fn coverage_partial(State(db): State<Db>, headers: HeaderMap) -> Result<Html<String>, AppError> {
+    Ok(Html(
+        CoveragePartial {
+            coverage: stats::network_coverage(&db, now())?,
+            tar1090: tar1090_base(&headers),
+        }
+        .render()?,
+    ))
+}
+
+async fn api_coverage(State(db): State<Db>) -> Result<Json, ApiError> {
+    Ok(Json(serde_json::to_value(stats::network_coverage(&db, now())?)?))
 }
 
 #[derive(Deserialize, Default)]

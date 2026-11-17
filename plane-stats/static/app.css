@@ -1261,3 +1261,11 @@ td.links a:hover { text-decoration: underline; }
   background: linear-gradient(160deg, var(--glass-top), var(--glass-bottom));
 }
 .fact b { color: var(--text); font-weight: 600; }
+
+.coverage-status { margin: 0 0 0.9rem; font-size: 0.8rem; color: var(--muted); }
+.coverage-status.stale { color: var(--warning); }
+.mlat-badge {
+  display: inline-block; padding: 0.05rem 0.35rem; border-radius: 999px;
+  border: 1px solid rgba(158, 197, 232, 0.35); font-size: 0.62rem;
+  color: var(--accent); letter-spacing: 0.04em;
+}

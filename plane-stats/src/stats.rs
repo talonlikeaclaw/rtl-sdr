@@ -2,6 +2,8 @@ use chrono::Timelike;
 use rusqlite::types::Value;
 use rusqlite::{params, Connection, OptionalExtension, Row};
 
+use std::collections::HashMap;
+
 use crate::Db;
 
 /// An aircraft is "live" (still on the tar1090 map) when the poller recorded
@@ -789,6 +791,14 @@ fn fmt_num(v: f64) -> String {
     } else {
         format!("{v:.1}")
     }
+}
+
+fn clock_str(epoch: f64) -> String {
+    chrono::DateTime::from_timestamp(epoch as i64, 0)
+        .expect("valid ts")
+        .with_timezone(&chrono::Local)
+        .format("%H:%M:%S")
+        .to_string()
 }
 
 /// Compact y-axis labels: large counters read as `394k` instead of six digits.
@@ -1587,6 +1597,216 @@ pub fn visits_for(db: &Db, hex: &str) -> rusqlite::Result<Vec<VisitRow>> {
         Ok(VisitRow { start_ts: r.get(0)?, end_ts: r.get(1)?, polls: r.get(2)? })
     })?;
     rows.collect()
+}
+
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct CoverageRow {
+    pub hex: String,
+    pub flight: Option<String>,
+    pub registration: Option<String>,
+    pub typecode: Option<String>,
+    pub alt_ft: Option<i64>,
+    pub gs_kts: Option<f64>,
+    pub dst_nm: Option<f64>,
+    pub dir_deg: Option<f64>,
+    pub seen: Option<f64>,
+    pub mlat_pos: bool,
+    pub last_seen_local: Option<String>,
+    pub local: bool,
+}
+
+impl CoverageRow {
+    pub fn type_url(&self) -> Option<String> {
+        self.typecode
+            .as_deref()
+            .filter(|c| valid_designator(c))
+            .map(|c| format!("/type/{c}"))
+    }
+    pub fn map_url(&self, base: &str) -> Option<String> {
+        self.local.then(|| format!("{base}/?icao={}", self.hex))
+    }
+    pub fn trace_url(&self, base: &str) -> Option<String> {
+        self.local.then(|| format!("{base}/?showTrace={}", self.hex))
+    }
+    pub fn adsb_url(&self) -> String {
+        format!("https://globe.adsb.fi/?icao={}", self.hex)
+    }
+    pub fn alt_str(&self) -> String {
+        self.alt_ft.map(|v| v.to_string()).unwrap_or_else(|| "-".into())
+    }
+    pub fn dst_str(&self) -> String {
+        self.dst_nm.map(|v| format!("{v:.1}")).unwrap_or_else(|| "-".into())
+    }
+    pub fn dir_str(&self) -> String {
+        self.dir_deg.map(|v| format!("{v:.0}\u{00b0}")).unwrap_or_else(|| "-".into())
+    }
+    pub fn seen_str(&self) -> String {
+        self.seen.map(|v| format!("{v:.0}s")).unwrap_or_else(|| "-".into())
+    }
+}
+
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct NetworkCoverage {
+    pub fetched_at: Option<f64>,
+    pub age_secs: Option<f64>,
+    pub ok: bool,
+    pub error: Option<String>,
+    pub stale: bool,
+    pub radius_nm: f64,
+    pub local_count: usize,
+    pub network_count: usize,
+    pub overlap: usize,
+    pub unique: usize,
+    pub missed: usize,
+    pub unique_rows: Vec<CoverageRow>,
+    pub missed_rows: Vec<CoverageRow>,
+}
+
+impl NetworkCoverage {
+    pub fn status_str(&self) -> String {
+        if self.ok {
+            match self.age_secs {
+                Some(a) => format!("network poll {a:.0}s ago"),
+                None => "network poll never completed".into(),
+            }
+        } else {
+            match &self.error {
+                Some(e) => format!("network unavailable: {e}"),
+                None => "network unavailable".into(),
+            }
+        }
+    }
+}
+
+/// Diff the local receiver's live set against the network's rolling set.
+///
+/// `network::latest()` is called before `db_lock` so the view lock is never
+/// held while waiting for SQLite.
+pub fn network_coverage(db: &Db, now: f64) -> rusqlite::Result<NetworkCoverage> {
+    let view = crate::network::latest();
+    let conn = crate::db_lock(db);
+    let cutoff = now - LIVE_WINDOW_SECS;
+
+    let mut local: HashMap<String, CoverageRow> = HashMap::new();
+    let mut stmt = conn.prepare(
+        "SELECT a.hex, a.last_flight,
+                coalesce(nullif(e.registration,''), n.registration),
+                coalesce(nullif(e.typecode,''), n.typecode),
+                a.last_alt_ft, a.last_gs_kts, a.last_range_nm,
+                a.last_lat, a.last_lon, a.last_seen
+         FROM aircraft a
+         LEFT JOIN enrichment e ON e.icao24 = a.hex
+         LEFT JOIN network_enrichment n ON n.hex = a.hex
+         WHERE a.last_seen > ?1 AND (a.last_alt_ft IS NULL OR a.last_alt_ft > 0)",
+    )?;
+    let rows = stmt.query_map(params![cutoff], |r| {
+        Ok((
+            r.get::<_, String>(0)?,
+            r.get::<_, Option<String>>(1)?,
+            r.get::<_, Option<String>>(2)?,
+            r.get::<_, Option<String>>(3)?,
+            r.get::<_, Option<i64>>(4)?,
+            r.get::<_, Option<f64>>(5)?,
+            r.get::<_, Option<f64>>(6)?,
+            r.get::<_, Option<f64>>(7)?,
+            r.get::<_, Option<f64>>(8)?,
+            r.get::<_, f64>(9)?,
+        ))
+    })?;
+    let rx = rx_pos();
+    for row in rows {
+        let (hex, flight, registration, typecode, alt_ft, gs_kts, dst_nm, last_lat, last_lon, last_seen) =
+            row?;
+        let dir_deg = match (rx, last_lat, last_lon) {
+            (Some((rlat, rlon)), Some(lat), Some(lon)) => Some(bearing_deg(rlat, rlon, lat, lon)),
+            _ => None,
+        };
+        local.insert(
+            hex.clone(),
+            CoverageRow {
+                hex,
+                flight,
+                registration,
+                typecode,
+                alt_ft,
+                gs_kts,
+                dst_nm,
+                dir_deg,
+                seen: Some((now - last_seen).max(0.0)),
+                mlat_pos: false,
+                last_seen_local: Some(clock_str(last_seen)),
+                local: true,
+            },
+        );
+    }
+
+    let mut network: HashMap<String, CoverageRow> = HashMap::new();
+    for (hex, a) in &view.aircraft {
+        if a.on_ground || !view.recent.contains_key(hex) {
+            continue;
+        }
+        network.insert(
+            hex.clone(),
+            CoverageRow {
+                hex: hex.clone(),
+                flight: a.flight.clone(),
+                registration: a.registration.clone(),
+                typecode: a.typecode.clone(),
+                alt_ft: a.alt_ft,
+                gs_kts: a.gs_kts,
+                dst_nm: a.dst_nm,
+                dir_deg: a.dir_deg,
+                seen: a.seen,
+                mlat_pos: a.mlat_pos,
+                last_seen_local: None,
+                local: false,
+            },
+        );
+    }
+
+    let mut unique_rows = Vec::new();
+    let mut overlap = 0usize;
+    for (hex, row) in &local {
+        if network.contains_key(hex) {
+            overlap += 1;
+        } else {
+            unique_rows.push(row.clone());
+        }
+    }
+    let mut missed_rows: Vec<CoverageRow> = network
+        .iter()
+        .filter(|(hex, _)| !local.contains_key(*hex))
+        .map(|(_, row)| row.clone())
+        .collect();
+
+    unique_rows.sort_by(|a, b| {
+        a.seen
+            .unwrap_or(f64::MAX)
+            .total_cmp(&b.seen.unwrap_or(f64::MAX))
+    });
+    missed_rows.sort_by(|a, b| {
+        a.seen
+            .unwrap_or(f64::MAX)
+            .total_cmp(&b.seen.unwrap_or(f64::MAX))
+    });
+
+    let age_secs = view.fetched_at.map(|t| (now - t).max(0.0));
+    let stale = !view.ok || age_secs.map_or(true, |a| a > LIVE_WINDOW_SECS);
+    Ok(NetworkCoverage {
+        fetched_at: view.fetched_at,
+        age_secs,
+        ok: view.ok,
+        error: view.error.clone(),
+        stale,
+        radius_nm: view.radius_nm,
+        local_count: local.len(),
+        network_count: network.len(),
+        overlap,
+        unique: unique_rows.len(),
+        missed: missed_rows.len(),
+        unique_rows,
+        missed_rows,
+    })
 }
 
 #[derive(Debug, serde::Serialize)]
