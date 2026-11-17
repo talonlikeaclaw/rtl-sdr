@@ -853,6 +853,25 @@ impl DayRecord {
     }
 }
 
+#[derive(Debug, Default, Clone, serde::Serialize)]
+pub struct NetworkDigest {
+    pub seen: i64,
+    pub local_seen: i64,
+    pub only_network: i64,
+    pub only_local: i64,
+    pub overlap: i64,
+    pub cover_pct: Option<f64>,
+    pub ok: bool,
+    pub age_secs: Option<f64>,
+    pub radius_nm: f64,
+}
+
+impl NetworkDigest {
+    pub fn cover_str(&self) -> Option<String> {
+        self.cover_pct.map(|p| format!("{p:.0}"))
+    }
+}
+
 #[derive(Debug, Default, serde::Serialize)]
 pub struct TodaySummary {
     pub day: String,
@@ -870,6 +889,7 @@ pub struct TodaySummary {
     pub peak_airborne: Option<i64>,
     pub first_ts: Option<f64>,
     pub last_ts: Option<f64>,
+    pub network: NetworkDigest,
 }
 
 impl TodaySummary {
@@ -927,6 +947,7 @@ fn fmt_axis(v: f64) -> String {
 
 /// Today's row in the daily ledger, aggregated.
 pub fn today_summary(db: &Db, now: f64) -> rusqlite::Result<TodaySummary> {
+    let view = crate::network::latest();
     let conn = crate::db_lock(db);
     let day = local_day(now);
     let today_start = local_day_start(now);
@@ -960,6 +981,49 @@ pub fn today_summary(db: &Db, now: f64) -> rusqlite::Result<TodaySummary> {
         params![today_start],
         |r| r.get(0),
     )?;
+    let seen: i64 = conn.query_row(
+        "SELECT COUNT(*) FROM network_day_aircraft WHERE day = ?1",
+        params![day],
+        |r| r.get(0),
+    )?;
+    let local_seen: i64 = conn.query_row(
+        "SELECT COUNT(*) FROM day_aircraft WHERE day = ?1 AND max_alt_ft IS NOT NULL",
+        params![day],
+        |r| r.get(0),
+    )?;
+    let only_network: i64 = conn.query_row(
+        "SELECT COUNT(*) FROM network_day_aircraft n
+         LEFT JOIN day_aircraft d ON d.day = n.day AND d.hex = n.hex AND d.max_alt_ft IS NOT NULL
+         WHERE n.day = ?1 AND d.hex IS NULL",
+        params![day],
+        |r| r.get(0),
+    )?;
+    let only_local: i64 = conn.query_row(
+        "SELECT COUNT(*) FROM day_aircraft d
+         LEFT JOIN network_day_aircraft n ON n.day = d.day AND n.hex = d.hex
+         WHERE d.day = ?1 AND d.max_alt_ft IS NOT NULL AND n.hex IS NULL",
+        params![day],
+        |r| r.get(0),
+    )?;
+    let overlap: i64 = conn.query_row(
+        "SELECT COUNT(*) FROM day_aircraft d
+         JOIN network_day_aircraft n ON n.day = d.day AND n.hex = d.hex
+         WHERE d.day = ?1 AND d.max_alt_ft IS NOT NULL",
+        params![day],
+        |r| r.get(0),
+    )?;
+    let age_secs = view.fetched_at.map(|t| (now - t).max(0.0));
+    let network = NetworkDigest {
+        seen,
+        local_seen,
+        only_network,
+        only_local,
+        overlap,
+        cover_pct: (seen > 0).then(|| overlap as f64 * 100.0 / seen as f64),
+        ok: view.status.ok && age_secs.is_some_and(|a| a <= 60.0),
+        age_secs,
+        radius_nm: view.radius_nm,
+    };
     Ok(TodaySummary {
         day,
         unique,
@@ -970,6 +1034,7 @@ pub fn today_summary(db: &Db, now: f64) -> rusqlite::Result<TodaySummary> {
         peak_airborne,
         first_ts,
         last_ts,
+        network,
     })
 }
 

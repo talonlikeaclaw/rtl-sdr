@@ -64,8 +64,23 @@
               <div class="sub">messages</div>
               <div class="who">{% if summary.first_ts.is_some() %}{{ summary.span_str() }} local{% else %}no polls yet{% endif %}</div>
             </div>
+            <div class="card">
+              <div class="num">{% if summary.network.ok %}{{ summary.network.seen }}{% else %}-{% endif %}</div>
+              <div class="sub">network saw</div>
+              <div class="who">
+                {% if summary.network.ok %}
+                  {{ summary.network.local_seen }} you saw{% if let Some(p) = summary.network.cover_str() %} · {{ p }}% covered{% endif %}<br>
+                  {{ summary.network.only_local }} only you · {{ summary.network.only_network }} only network
+                {% else %}
+                  network data unavailable
+                {% endif %}
+              </div>
+            </div>
           </div>
         </div>
+        {% if summary.network.radius_nm > 0.0 %}
+        <p class="type-credit">Within {{ summary.network.radius_nm }} NM; ground contacts excluded. Network data: <a href="https://adsb.fi/" target="_blank" rel="noopener">adsb.fi</a>.</p>
+        {% endif %}
       </section>
 
       <section class="glass panel" aria-label="Records today">
