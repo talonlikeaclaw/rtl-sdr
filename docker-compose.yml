@@ -18,6 +18,8 @@ services:
       - readsb_autogain:/run/autogain
     ports:
       - "30005:30005"
+      # Beast input for MLAT results (adsb.fi mlat-client runs on the host).
+      - "127.0.0.1:30104:30104"
     environment:
       TZ: ${TZ}
       READSB_DEVICE_TYPE: rtlsdr
@@ -32,6 +34,8 @@ services:
       READSB_RX_LOCATION_ACCURACY: "2"
       READSB_STATS_RANGE: "true"
       READSB_NET_ENABLE: "true"
+      # Beast input: mlat-client injects results here (default image leaves it off).
+      READSB_NET_BEAST_INPUT_PORT: "30104"
 
   tar1090:
     profiles: [adsb]

@@ -31,7 +31,11 @@ Rebuild after touching the Dockerfile: `docker compose --profile adsb build read
 
 | Profile | Services | Ports |
 |---|---|---|
-| `adsb` | readsb, tar1090, plane-stats (see AGENTS.md) | 8080 (map), 30005 (Beast), 8081 (stats) |
+| `adsb` | readsb, tar1090, plane-stats (see AGENTS.md) | 8080 (map), 30005 (Beast), 8081 (stats), 30104 (MLAT results, localhost) |
+
+`adsb.fi` is fed by host systemd services (`adsbfi-feed`, `adsbfi-mlat`), not a
+compose profile. They read the same Beast stream and retry while `adsb` is down;
+see `feeders/adsbfi/`.
 
 ## Roadmap
 
@@ -45,6 +49,6 @@ Each profile below gets added in its own phase, with a manual-test checkpoint be
 | `acars` | ACARSHub | `ghcr.io/sdr-enthusiasts/docker-acarshub` | 131 MHz (single dongle: ACARS first, VDL2 needs 2nd dongle) |
 | `pocsag` | rtl_fm + multimon-ng → PagerMon | `pagermon/pagermon` official image | 150–160 MHz |
 | `sondes` | radiosonde_auto_rx | official Docker wiki (projecthorus) | 400–406 MHz |
-| `feeders` | ADS-B aggregators (ADSB.fi / ADSB Exchange) | TBD at that phase's planning | — |
+| `feeders` | adsb.fi done (host systemd, `feeders/adsbfi/`); ADSB Exchange/others TBD | — | — |
 
 Images and env vars for later phases get verified when each phase is planned; roadmap rows are intent, not yet runnable.

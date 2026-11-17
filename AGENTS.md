@@ -32,6 +32,37 @@ curl -s localhost:8080/data/aircraft.json | head -c 400   # live aircraft
 docker logs readsb | grep -i "V4 Lite Detected"
 ```
 
+## adsb.fi feeder
+
+Host-level, not compose: adsb.fi has no Docker image. `feeders/adsbfi/` documents
+it; the installer compiles a patched `readsb` (`feed-adsbfi`) and `mlat-client`
+into `/usr/local/share/adsbfi`, creates the `adsbfi` system user, and installs
+`adsbfi-feed.service` + `adsbfi-mlat.service`. Config is `/etc/default/adsbfi`.
+
+- `feed-adsbfi` connects to `127.0.0.1:30005` (compose-published Beast output)
+  and pushes reduced Beast to `feed.adsb.fi:30004`.
+- `mlat-client` connects to the same `30005`, talks to `feed.adsb.fi:31090`, and
+  injects results into `readsb` on `127.0.0.1:30104`. Compose therefore sets
+  `READSB_NET_BEAST_INPUT_PORT=30104` and publishes `127.0.0.1:30104:30104`;
+  without both, MLAT results never reach `tar1090`.
+- `USER="0"` disables MLAT (ADS-B feed only). A real `USER` enables it and needs
+  antenna lat/lon/altitude ASL accurate to ~15 m. `PRIVACY="--privacy"` hides
+  the feeder name on the MLAT map.
+- The feeder UUID is `/usr/local/share/adsbfi/adsbfi-uuid`; do not regenerate it
+  casually or the site sees a new feeder.
+- The services are independent of compose. They retry while the `adsb` profile
+  is down (e.g. AIS running) and resume when it returns.
+
+```bash
+systemctl status adsbfi-feed adsbfi-mlat
+ss -tn | grep -E '30004|31090'          # outbound to feed.adsb.fi
+sudo journalctl -u adsbfi-feed -n 20 --no-pager
+sudo journalctl -u adsbfi-mlat -n 20 --no-pager
+```
+
+Re-run `sudo bash /usr/local/share/adsbfi/git/update.sh` after config changes.
+Uninstall with `sudo bash /usr/local/share/adsbfi/uninstall.sh`.
+
 ## Conventions
 
 - One compose profile per future app (ais/sat/acars/pocsag/sondes/feeders per
