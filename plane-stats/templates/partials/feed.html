@@ -1,0 +1,38 @@
+<dl class="feed-grid">
+  <div class="feed-item">
+    <dt>Feed client</dt>
+    <dd{% if !feed.feed.ok %} class="warn"{% endif %}>
+      {% if feed.feed.ok %}OK · {{ feed.feed.aircraft_count.unwrap_or(0) }} aircraft · {{ feed.feed.messages.unwrap_or(0) }} messages
+      {% else %}status file missing{% if let Some(e) = feed.feed.error %} · {{ e }}{% endif %}{% endif %}
+    </dd>
+  </div>
+  <div class="feed-item">
+    <dt>Network API</dt>
+    <dd{% if !feed.network.ok %} class="warn"{% endif %}>
+      {% if feed.network.ok %}OK · {{ feed.network.aircraft }} aircraft within {{ feed.network.radius_nm }} NM · {{ feed.network_age_str() }}
+      {% else %}{{ feed.network.error.as_deref().unwrap_or("unavailable") }}{% endif %}
+    </dd>
+  </div>
+  <div class="feed-item">
+    <dt>Feeder recognized</dt>
+    <dd>
+      {% if let Some(ok) = feed.network.snapshot_ok %}
+        {% if ok %}yes · HTTP {{ feed.network.snapshot_status.unwrap_or(0) }} · {{ feed.snapshot_age_str() }}
+        {% else %}no{% if let Some(s) = feed.network.snapshot_status %} · HTTP {{ s }}{% endif %}{% endif %}
+      {% else %}not checked yet{% endif %}
+    </dd>
+  </div>
+  <div class="feed-item">
+    <dt>Network totals</dt>
+    <dd>{% if let Some(t) = feed.network.totals %}{{ t.beast_str() }} feeders · {{ t.mlat_str() }} MLAT · {{ t.aircraft_str() }} aircraft{% else %}-{% endif %}</dd>
+  </div>
+  <div class="feed-item">
+    <dt>Nearby feeders</dt>
+    <dd>{{ feed.network.nearby_label() }}</dd>
+  </div>
+  <div class="feed-item">
+    <dt>Local poller</dt>
+    <dd>{{ feed.local_poller_str() }}</dd>
+  </div>
+</dl>
+<p class="type-credit">Network data: <a href="https://adsb.fi/" target="_blank" rel="noopener">adsb.fi</a></p>

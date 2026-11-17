@@ -548,6 +548,110 @@ pub fn last_poll_age(db: &Db, now: f64) -> rusqlite::Result<Option<f64>> {
     Ok(last.map(|ts| (now - ts).max(0.0)))
 }
 
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct FeedFileStatus {
+    pub ok: bool,
+    pub path: String,
+    pub error: Option<String>,
+    pub age_secs: Option<f64>,
+    pub aircraft_count: Option<usize>,
+    pub messages: Option<i64>,
+}
+
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct FeederStatus {
+    pub feed: FeedFileStatus,
+    pub network: crate::network::NetworkStatus,
+    pub network_age_secs: Option<f64>,
+    pub snapshot_age_secs: Option<f64>,
+    pub local_poller_age_secs: Option<f64>,
+}
+
+impl FeederStatus {
+    pub fn network_age_str(&self) -> String {
+        self.network_age_secs
+            .map(|a| format!("{a:.0}s ago"))
+            .unwrap_or_else(|| "never".into())
+    }
+    pub fn snapshot_age_str(&self) -> String {
+        self.snapshot_age_secs
+            .map(|a| format!("{a:.0}s ago"))
+            .unwrap_or_else(|| "never".into())
+    }
+    pub fn local_poller_str(&self) -> String {
+        self.local_poller_age_secs
+            .map(|a| format!("{a:.0}s ago"))
+            .unwrap_or_else(|| "no polls yet".into())
+    }
+}
+
+#[derive(serde::Deserialize)]
+struct FeedPayload {
+    #[serde(default)]
+    now: f64,
+    #[serde(default)]
+    messages: i64,
+    #[serde(default)]
+    aircraft: Vec<serde_json::Value>,
+}
+
+pub fn feeder_status(db: &Db, now: f64) -> rusqlite::Result<FeederStatus> {
+    let view = crate::network::latest();
+    let path = std::env::var("FEED_JSON")
+        .unwrap_or_else(|_| "/run/adsbfi-feed/aircraft.json".to_string());
+    let feed = read_feed_file(&path, now);
+    let network = view.status.clone();
+    let network_age_secs = view.fetched_at.map(|t| (now - t).max(0.0));
+    let snapshot_age_secs = network.snapshot_at.map(|t| (now - t).max(0.0));
+    Ok(FeederStatus {
+        feed,
+        network,
+        network_age_secs,
+        snapshot_age_secs,
+        local_poller_age_secs: last_poll_age(db, now)?,
+    })
+}
+
+fn read_feed_file(path: &str, now: f64) -> FeedFileStatus {
+    let meta = std::fs::metadata(path);
+    let mtime = meta
+        .as_ref()
+        .ok()
+        .and_then(|m| m.modified().ok())
+        .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+        .map(|d| d.as_secs_f64());
+    match std::fs::read_to_string(path) {
+        Ok(text) => match serde_json::from_str::<FeedPayload>(&text) {
+            Ok(p) => FeedFileStatus {
+                ok: true,
+                path: path.to_string(),
+                error: None,
+                age_secs: mtime
+                    .map(|t| (now - t).max(0.0))
+                    .or(Some((now - p.now).max(0.0))),
+                aircraft_count: Some(p.aircraft.len()),
+                messages: Some(p.messages),
+            },
+            Err(e) => FeedFileStatus {
+                ok: false,
+                path: path.to_string(),
+                error: Some(e.to_string()),
+                age_secs: mtime.map(|t| (now - t).max(0.0)),
+                aircraft_count: None,
+                messages: None,
+            },
+        },
+        Err(e) => FeedFileStatus {
+            ok: false,
+            path: path.to_string(),
+            error: Some(e.to_string()),
+            age_secs: mtime.map(|t| (now - t).max(0.0)),
+            aircraft_count: None,
+            messages: None,
+        },
+    }
+}
+
 /// Whether the receiver is still answering. The dashboard's whole liveness
 /// claim hangs off this, so it is a first-class datum, not a decoration.
 #[derive(Debug, Clone, serde::Serialize)]

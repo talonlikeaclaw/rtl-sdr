@@ -30,6 +30,8 @@ pub fn router(db: Db) -> Router {
         .route("/partials/cards", get(cards_partial))
         .route("/partials/emergencies", get(emergencies_partial))
         .route("/partials/live", get(live_partial))
+        .route("/partials/feed", get(feed_partial))
+        .route("/api/feed", get(api_feed))
         .route("/api/aircraft", get(api_aircraft))
         .route("/api/emergencies", get(api_emergencies))
         .route("/api/live", get(api_live))
@@ -109,6 +111,7 @@ struct IndexTemplate {
     filter: stats::FleetFilter,
     counts: stats::FilterCounts,
     poller: stats::PollerHealth,
+    feed: stats::FeederStatus,
     tar1090: String,
     now: f64,
     rx: Option<(f64, f64)>,
@@ -205,6 +208,7 @@ async fn index(
     let recent = stats::recent_arrivals(&db)?;
     let emergencies = stats::emergency_log(&db, 20)?;
     let poller = stats::PollerHealth::new(stats::last_poll_age(&db, now)?);
+    let feed = stats::feeder_status(&db, now)?;
     Ok(Html(
         IndexTemplate {
             stats: st,
@@ -219,6 +223,7 @@ async fn index(
             filter: view.filter,
             counts: view.counts,
             poller,
+            feed,
             tar1090: tar1090_base(&headers),
             now,
             rx: stats::rx_pos(),
@@ -488,6 +493,22 @@ async fn live_partial(State(db): State<Db>, headers: HeaderMap) -> Result<Html<S
 
 async fn api_live(State(db): State<Db>) -> Result<Json, ApiError> {
     Ok(Json(serde_json::to_value(stats::live_aircraft(&db, now())?)?))
+}
+
+#[derive(Template)]
+#[template(path = "partials/feed.html")]
+struct FeedTemplate {
+    feed: stats::FeederStatus,
+}
+
+async fn feed_partial(State(db): State<Db>) -> Result<Html<String>, AppError> {
+    Ok(Html(
+        FeedTemplate { feed: stats::feeder_status(&db, now())? }.render()?,
+    ))
+}
+
+async fn api_feed(State(db): State<Db>) -> Result<Json, ApiError> {
+    Ok(Json(serde_json::to_value(stats::feeder_status(&db, now())?)?))
 }
 
 #[derive(Template)]
