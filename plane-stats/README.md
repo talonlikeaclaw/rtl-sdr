@@ -1,0 +1,161 @@
+# plane-stats
+
+Read-only ledger and dashboard for every aircraft the RTL-SDR hears. A small
+Rust service (axum + tokio + rusqlite) polls tar1090's `aircraft.json` every
+10 s, stores what it sees in SQLite, and serves a server-rendered web UI plus a
+JSON API on port **8081**.
+
+Part of the `sdr` Docker Compose project; runs under the `adsb` profile next to
+readsb and tar1090. Only the poller writes to the database.
+
+## Pages
+
+| Path             | What it shows                                                                                                          |
+| ---------------- | ---------------------------------------------------------------------------------------------------------------------- |
+| `/`              | Fleet table: search, sort, filter chips, pagination (100/page), live "overhead now" panel, summary cards               |
+| `/aircraft/:hex` | Aircraft profile: visits, callsigns, records, registration/type enrichment, emergency history, tar1090 map/trace links |
+| `/today`         | Daily digest: unique/new aircraft, hour histogram, records vs prior days                                               |
+| `/activity`      | 7×24 weekday/hour heatmap, range-by-day and messages-by-day charts                                                     |
+| `/types`         | Type dex: every ICAO type designator heard, with photo and catch stats                                                 |
+| `/type/:code`    | Type profile: ICAO Doc 8643 specs, Wikipedia extract/photo, Wikidata facts, airframes seen                             |
+
+tar1090 deep links (`?icao=<hex>`, `?showTrace=<hex>`) render only while an
+aircraft is live (last seen within 60 s).
+
+## JSON API
+
+All endpoints return JSON and are read-only.
+
+| Path                            | Content                                              |
+| ------------------------------- | ---------------------------------------------------- |
+| `/api/aircraft`                 | Full fleet list (no pagination)                      |
+| `/api/aircraft/:hex`            | One aircraft                                         |
+| `/api/live`                     | Aircraft heard in the last 60 s                      |
+| `/api/emergencies`              | Emergency squawk log                                 |
+| `/api/today`                    | `{summary, hours, records, new}`                     |
+| `/api/activity`                 | Heatmap and chart series                             |
+| `/api/types`, `/api/type/:code` | Type dex and one designator                          |
+| `/api/stats`                    | All-time aggregates (uncached; UI uses a 10 s cache) |
+
+HTMX partials live under `/partials/{table,table/rows,cards,emergencies,live}`.
+
+## Run it
+
+From the repository root:
+
+```bash
+docker compose --profile adsb up -d plane-stats
+curl -s localhost:8081/api/live | head -c 400
+```
+
+Rebuild after code changes (templates and `static/` are baked into the binary):
+
+```bash
+docker compose --profile adsb build plane-stats   # ~4 min on the Pi
+docker compose --profile adsb up -d plane-stats
+docker logs --tail 20 plane-stats
+```
+
+## Configuration
+
+| Variable            | Default                                       | Purpose                                                    |
+| ------------------- | --------------------------------------------- | ---------------------------------------------------------- |
+| `DB_PATH`           | `/data/planes.db`                             | SQLite database (WAL). Parent directory is created         |
+| `AIRCRAFT_JSON_URL` | `http://tar1090:80/data/aircraft.json`        | Poll source                                                |
+| `ENRICHMENT_CSV`    | `/usr/share/plane-stats/aircraftDatabase.csv` | OpenSky metadata CSV, baked into the image                 |
+| `TAR1090_URL`       | derived from request `Host` (:8080)           | Browser-facing tar1090 base for deep links                 |
+| `RX_LAT`, `RX_LON`  | unset                                         | Receiver position; enables the live panel's bearing column |
+| `TZ`                | container default                             | Local day/hour bucketing (`chrono::Local`)                 |
+| `RUST_LOG`          | `plane_stats=info`                            | Log filter                                                 |
+
+In Compose, `RX_LAT`/`RX_LON` are wired from `READSB_LAT`/`READSB_LON`.
+
+## Data model
+
+SQLite tables are created on boot (`CREATE TABLE IF NOT EXISTS`); schema changes
+are additive via `NEW_COLUMNS` in `src/main.rs`.
+
+- `aircraft` — one row per hex: first/last seen, sightings, callsign/squawk/
+  category, all-time records, last position/track, `db_flags`, last live state
+  (`last_*` columns drive the overhead panel).
+- `visits` — one row per continuous pass (a gap > 10 min starts a new visit).
+- `aircraft_callsigns` — callsigns seen per hex.
+- `poll_log` / `poll_hour` — per-poll and hourly aircraft counts; `poll_log` is
+  pruned at 90 days.
+- `day_aircraft` — per local day per hex: first/last seen, polls, max
+  altitude/speed/range. Never pruned.
+- `enrichment` — OpenSky registration/type/owner data (~520k rows), plus
+  `enrichment_meta` stamps for the CSV and background-task TTLs.
+- `emergency_log` — squawk/emergency events.
+- `aircraft_types` / `type_wiki_map` — cached Doc 8643 specs and Wikipedia
+  profiles for the type dex.
+
+`aircraft` and `visits` are never pruned. The database lives on the named
+volume `sdr_plane_stats_db`.
+
+### Enrichment reload
+
+The ~94 MB OpenSky CSV is re-inserted only when its size+mtime differs from the
+stamp in `enrichment_meta`. First boot after an image/CSV change takes ~1 min;
+later boots are seconds. The CSV is downloaded in its own Docker stage, so
+source rebuilds reuse it. Bump `CSV_VERSION` to force a fresh download:
+
+```bash
+docker compose --profile adsb build --build-arg CSV_VERSION=2 plane-stats
+```
+
+To force a reload without a rebuild, delete the stamp:
+
+```sql
+DELETE FROM enrichment_meta;
+```
+
+There is no `sqlite3` in the image; use a throwaway container.
+
+## Type dex background task
+
+`types::run` refreshes ICAO Doc 8643 monthly, the Wikipedia designator map
+weekly, and profiles for types heard monthly. Requests are batched (20 titles /
+50 QIDs) and spaced 2 s apart; a 429 backs off 60 s and retries three times,
+then waits for the next hourly cycle. Every failure is non-fatal — pages render
+with whatever is cached.
+
+## Development
+
+`cargo` works on the host (Nix-provided); Docker is the deployment path.
+
+```bash
+cd plane-stats
+cargo check
+cargo build --release
+```
+
+Templates (`templates/`) and `static/` are compiled into the binary with
+`include_bytes!`, so a rebuild is required after editing them. `Cargo.lock` is
+committed on purpose.
+
+Local run against a live tar1090:
+
+```bash
+DB_PATH=./planes.db \
+AIRCRAFT_JSON_URL=http://localhost:8080/data/aircraft.json \
+TAR1090_URL=http://localhost:8080 \
+cargo run
+```
+
+## Operations
+
+Back up the volume before schema work:
+
+```bash
+docker run --rm -v sdr_plane_stats_db:/data -v "$PWD":/backup alpine \
+  tar czf /backup/planes.tgz -C /data .
+```
+
+A nightly copy also lands in `/mnt/truenas/talon/pi-backups/daily/` (03:00
+timer). Do not put the SQLite database on CIFS — locking is unreliable.
+
+## More context
+
+- `../AGENTS.md` — build loop, schema rules, tar1090 quirks, refresh model.
+- `PLAN.md` — step-by-step roadmap and progress table.
