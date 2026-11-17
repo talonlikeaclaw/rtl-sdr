@@ -130,11 +130,11 @@ struct V3Aircraft {
 #[derive(Deserialize)]
 struct StatsResponse {
     #[serde(default, rename = "beastFeeders")]
-    beast_feeders: Option<String>,
+    beast_feeders: Option<serde_json::Value>,
     #[serde(default, rename = "mlatFeeders")]
-    mlat_feeders: Option<String>,
+    mlat_feeders: Option<serde_json::Value>,
     #[serde(default, rename = "totalAircraft")]
-    total_aircraft: Option<String>,
+    total_aircraft: Option<serde_json::Value>,
 }
 
 #[derive(Deserialize)]
@@ -527,8 +527,12 @@ async fn stats_loop(client: reqwest::Client, cfg: Config) {
     }
 }
 
-fn parse_count(v: &Option<String>) -> Option<i64> {
-    v.as_deref()?.trim().parse().ok()
+fn parse_count(v: &Option<serde_json::Value>) -> Option<i64> {
+    match v.as_ref()? {
+        serde_json::Value::String(s) => s.trim().parse().ok(),
+        serde_json::Value::Number(n) => n.as_i64(),
+        _ => None,
+    }
 }
 
 async fn coverage_loop(client: reqwest::Client, cfg: Config, lat: f64, lon: f64) {
