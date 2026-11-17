@@ -62,6 +62,7 @@ services:
     depends_on: [tar1090]
     volumes:
       - plane_stats_db:/data
+      - /run/adsbfi-feed:/run/adsbfi-feed:ro
     ports:
       - "8081:8081"
     environment:
@@ -71,6 +72,14 @@ services:
       # Receiver position for the live panel's bearing column.
       RX_LAT: ${READSB_LAT}
       RX_LON: ${READSB_LON}
+      ADSB_FI_API: ${ADSB_FI_API:-https://opendata.adsb.fi/api}
+      ADSB_FI_WEB_API: ${ADSB_FI_WEB_API:-https://api.adsb.fi}
+      NETWORK_RADIUS_NM: ${NETWORK_RADIUS_NM:-100}
+      NETWORK_POLL_SECS: ${NETWORK_POLL_SECS:-10}
+      FEEDER_CHECK_SECS: ${FEEDER_CHECK_SECS:-35}
+      NETWORK_STATS_SECS: ${NETWORK_STATS_SECS:-300}
+      NETWORK_COVERAGE_SECS: ${NETWORK_COVERAGE_SECS:-600}
+      FEED_JSON: /run/adsbfi-feed/aircraft.json
 
 volumes:
   readsb_rrd:

@@ -13,9 +13,19 @@ const PRUNE_AFTER_DAYS: f64 = 90.0;
 /// carries no information, so it is parsed and discarded.
 #[derive(Deserialize, Debug)]
 #[serde(untagged)]
-enum Alt {
+pub(crate) enum Alt {
     Ft(f64),
     Ground(serde::de::IgnoredAny),
+}
+
+impl Alt {
+    /// `(altitude_ft, on_ground)`. `None` altitude is neither ground nor known.
+    pub(crate) fn split(&self) -> (Option<i64>, bool) {
+        match self {
+            Alt::Ft(ft) => (Some(*ft as i64), false),
+            Alt::Ground(_) => (None, true),
+        }
+    }
 }
 
 #[derive(Deserialize, Debug)]

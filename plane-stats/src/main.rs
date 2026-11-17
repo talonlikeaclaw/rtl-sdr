@@ -3,6 +3,7 @@ use std::sync::{Arc, Mutex};
 use rusqlite::{Connection, OptionalExtension};
 
 mod enrichment;
+mod network;
 mod poller;
 mod stats;
 mod types;
@@ -127,6 +128,27 @@ fn main() {
          CREATE TABLE IF NOT EXISTS type_wiki_map (
            designator TEXT PRIMARY KEY,
            title TEXT NOT NULL
+         );
+         CREATE TABLE IF NOT EXISTS network_day_aircraft (
+           day TEXT NOT NULL,
+           hex TEXT NOT NULL,
+           first_ts REAL NOT NULL,
+           last_ts  REAL NOT NULL,
+           polls INTEGER NOT NULL DEFAULT 1,
+           max_alt_ft INTEGER,
+           max_gs_kts REAL,
+           max_range_nm REAL,
+           mlat_pos INTEGER NOT NULL DEFAULT 0,
+           PRIMARY KEY (day, hex)
+         );
+         CREATE TABLE IF NOT EXISTS network_enrichment (
+           hex TEXT PRIMARY KEY,
+           registration TEXT,
+           typecode TEXT,
+           description TEXT,
+           owner TEXT,
+           year TEXT,
+           updated_at REAL NOT NULL
          );",
     )
     .expect("run migrations");
@@ -188,7 +210,8 @@ fn main() {
          CREATE INDEX IF NOT EXISTS aircraft_max_rssi   ON aircraft(max_rssi_dbfs DESC, hex);
          CREATE INDEX IF NOT EXISTS emergency_log_hex   ON emergency_log(hex);
          CREATE INDEX IF NOT EXISTS day_aircraft_hex    ON day_aircraft(hex);
-         CREATE INDEX IF NOT EXISTS enrichment_typecode ON enrichment(typecode);",
+         CREATE INDEX IF NOT EXISTS enrichment_typecode ON enrichment(typecode);
+         CREATE INDEX IF NOT EXISTS network_day_aircraft_hex ON network_day_aircraft(hex);",
     )
     .expect("create indexes");
 
@@ -238,6 +261,7 @@ fn main() {
     let runtime = tokio::runtime::Builder::new_multi_thread().enable_all().build().expect("tokio runtime");
     runtime.block_on(async move {
         tokio::spawn(poller::run(db.clone(), source));
+        tokio::spawn(network::run(db.clone()));
         // Doc 8643 + Wikipedia profiles are cached in SQLite; the task never
         // blocks startup and every page renders without it.
         tokio::spawn(types::run(db.clone()));
