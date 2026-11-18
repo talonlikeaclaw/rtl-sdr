@@ -2,6 +2,7 @@
       <td class="hex"><a href="/aircraft/{{ a.hex }}">{{ a.hex }}</a></td>
       <td class="col-callsign">{% if let Some(v) = a.last_flight %}{{ v }}{% else %}-{% endif %}</td>
       <td>{% if let Some(v) = a.registration %}{{ v }}{% else %}-{% endif %}</td>
+      <td class="country" title="{{ a.country_name() }}">{% if a.country.is_some() %}{{ a.country_flag() }} <span class="mono">{{ a.country_code() }}</span>{% else %}-{% endif %}</td>
       <td class="mono">{% if let Some(u) = a.type_url() %}<a href="{{ u }}" title="Open the {{ a.type_code() }} type page">{{ a.type_code() }}</a>{% else %}{{ a.type_code() }}{% endif %}</td>
       <td>{% if let Some(v) = a.last_squawk %}{{ v }}{% else %}-{% endif %}</td>
       <td>{% if let Some(v) = a.last_category %}{{ v }}{% else %}-{% endif %}</td>

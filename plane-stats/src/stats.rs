@@ -61,6 +61,7 @@ pub struct AircraftRow {
     pub last_range_nm: Option<f64>,
     pub last_baro_rate: Option<f64>,
     pub last_msg_age: Option<f64>,
+    pub country: Option<String>,
 }
 
 /// ICAO type designators are two to four alphanumeric characters. Shared by
@@ -98,6 +99,7 @@ fn row_to_aircraft(r: &Row) -> rusqlite::Result<AircraftRow> {
         last_range_nm: r.get(23)?,
         last_baro_rate: r.get(24)?,
         last_msg_age: r.get(25)?,
+        country: r.get(26)?,
     })
 }
 
@@ -185,7 +187,16 @@ impl AircraftRow {
     pub fn age_str(&self) -> String {
         self.last_msg_age.map(|v| format!("{v:.0}")).unwrap_or_else(|| "-".into())
     }
-    /// Compass bearing from the receiver to this aircraft, if both positions are known.
+    /// ISO alpha-2 state of registry, or `-`.
+    pub fn country_code(&self) -> &str {
+        self.country.as_deref().unwrap_or("-")
+    }
+    pub fn country_name(&self) -> String {
+        self.country.as_deref().map(crate::country::name).unwrap_or("-").to_string()
+    }
+    pub fn country_flag(&self) -> String {
+        self.country.as_deref().map(crate::country::flag).unwrap_or_default()
+    }
     pub fn bearing_str(&self, rx: &Option<(f64, f64)>) -> String {
         match (rx, self.last_lat, self.last_lon) {
             (Some((rx_lat, rx_lon)), Some(lat), Some(lon)) => {
@@ -216,6 +227,526 @@ pub fn bearing_deg(rx_lat: f64, rx_lon: f64, lat: f64, lon: f64) -> f64 {
     (y.atan2(x).to_degrees() + 360.0) % 360.0
 }
 
+/// 10° clockwise sector (0..35) for a compass bearing. Sector 0 is
+/// 000–009.99°, sector 35 is 350–359.99°.
+pub fn sector_for_bearing(bearing: f64) -> i64 {
+    (bearing.rem_euclid(360.0) / 10.0).floor() as i64 % 36
+}
+
+/// One point of the receiver polar plot, in viewBox coordinates.
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct PolarPoint {
+    pub bearing_deg: f64,
+    pub range_nm: f64,
+    pub x: f64,
+    pub y: f64,
+    pub label: String,
+}
+
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct PolarRing {
+    pub range_nm: f64,
+    pub r: f64,
+}
+
+#[derive(Debug, Default, Clone, serde::Serialize)]
+pub struct PolarChart {
+    pub points: Vec<PolarPoint>,
+    pub path: String,
+    pub max_nm: f64,
+    pub recent_points: Vec<PolarPoint>,
+    pub recent_path: String,
+    pub recent_days: u32,
+    pub rings: Vec<PolarRing>,
+    pub width: f64,
+    pub height: f64,
+    pub center: f64,
+    pub radius: f64,
+    pub first_day: Option<String>,
+}
+
+const POLAR_SIZE: f64 = 360.0;
+const POLAR_CENTER: f64 = 180.0;
+const POLAR_RADIUS: f64 = 150.0;
+const POLAR_RECENT_DAYS: u32 = 30;
+
+impl PolarChart {
+    /// Distance between the rings, for the chart caption.
+    pub fn ring_step(&self) -> f64 {
+        self.max_nm / 4.0
+    }
+    /// ViewBox coordinate of the outer ring's far edge.
+    pub fn edge(&self) -> f64 {
+        self.width - 30.0
+    }
+}
+
+/// Build the 36-point polygon for a sector→range map. Missing sectors are 0.
+fn polar_points(values: &[f64], max_nm: f64) -> (Vec<PolarPoint>, String) {
+    let mut points = Vec::with_capacity(36);
+    let mut any = false;
+    for sector in 0..36 {
+        let bearing_deg = sector as f64 * 10.0;
+        let range_nm = values.get(sector).copied().unwrap_or(0.0);
+        if range_nm > 0.0 {
+            any = true;
+        }
+        let rad = bearing_deg.to_radians();
+        let scale = if max_nm > 0.0 { range_nm / max_nm } else { 0.0 };
+        points.push(PolarPoint {
+            bearing_deg,
+            range_nm,
+            x: POLAR_CENTER + POLAR_RADIUS * scale * rad.sin(),
+            y: POLAR_CENTER - POLAR_RADIUS * scale * rad.cos(),
+            label: format!("{bearing_deg:03.0}\u{00b0}"),
+        });
+    }
+    if !any {
+        return (points, String::new());
+    }
+    let mut path = format!("M {POLAR_CENTER:.1},{POLAR_CENTER:.1}");
+    for p in &points {
+        path.push_str(&format!(" L {:.1},{:.1}", p.x, p.y));
+    }
+    path.push_str(" Z");
+    (points, path)
+}
+
+/// Best range heard in each 10° bearing sector: all time and the last 30 days.
+pub fn receiver_polar(db: &Db, now: f64) -> rusqlite::Result<PolarChart> {
+    let conn = crate::db_lock(db);
+    let mut all = [0.0f64; 36];
+    let mut stmt = conn.prepare(
+        "SELECT sector, MAX(max_range_nm) FROM range_sector
+         GROUP BY sector ORDER BY sector",
+    )?;
+    let rows = stmt.query_map([], |r| Ok((r.get::<_, i64>(0)?, r.get::<_, f64>(1)?)))?;
+    for row in rows {
+        let (sector, range) = row?;
+        if let Some(slot) = usize::try_from(sector).ok().and_then(|s| all.get_mut(s)) {
+            *slot = range;
+        }
+    }
+    let cutoff = local_day(now - f64::from(POLAR_RECENT_DAYS - 1) * 86_400.0);
+    let mut recent = [0.0f64; 36];
+    let mut stmt = conn.prepare(
+        "SELECT sector, MAX(max_range_nm) FROM range_sector
+         WHERE day >= ?1 GROUP BY sector ORDER BY sector",
+    )?;
+    let rows = stmt.query_map(params![cutoff], |r| Ok((r.get::<_, i64>(0)?, r.get::<_, f64>(1)?)))?;
+    for row in rows {
+        let (sector, range) = row?;
+        if let Some(slot) = usize::try_from(sector).ok().and_then(|s| recent.get_mut(s)) {
+            *slot = range;
+        }
+    }
+    let first_day: Option<String> =
+        conn.query_row("SELECT MIN(day) FROM range_sector", [], |r| r.get(0))?;
+    let observed = all.iter().copied().fold(0.0f64, f64::max);
+    if observed <= 0.0 {
+        return Ok(PolarChart {
+            recent_days: POLAR_RECENT_DAYS,
+            width: POLAR_SIZE,
+            height: POLAR_SIZE,
+            center: POLAR_CENTER,
+            radius: POLAR_RADIUS,
+            first_day,
+            ..Default::default()
+        });
+    }
+    let max_nm = (observed / 50.0).ceil().max(1.0) * 50.0;
+    let (points, path) = polar_points(&all, max_nm);
+    let (recent_points, recent_path) = polar_points(&recent, max_nm);
+    let rings = [0.25, 0.5, 0.75, 1.0]
+        .iter()
+        .map(|p| PolarRing { range_nm: max_nm * p, r: POLAR_RADIUS * p })
+        .collect();
+    Ok(PolarChart {
+        points,
+        path,
+        max_nm,
+        recent_points,
+        recent_path,
+        recent_days: POLAR_RECENT_DAYS,
+        rings,
+        width: POLAR_SIZE,
+        height: POLAR_SIZE,
+        center: POLAR_CENTER,
+        radius: POLAR_RADIUS,
+        first_day,
+    })
+}
+
+/// A one-hit wonder: an aircraft logged exactly once.
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct RarityRow {
+    pub hex: String,
+    pub registration: Option<String>,
+    pub typecode: Option<String>,
+    pub callsign: Option<String>,
+    pub first_seen: f64,
+    pub last_seen: f64,
+    pub sightings: i64,
+}
+
+impl RarityRow {
+    fn fmt_ts(epoch: f64) -> String {
+        chrono::DateTime::from_timestamp(epoch as i64, 0)
+            .expect("valid ts")
+            .with_timezone(&chrono::Local)
+            .format("%Y-%m-%d %H:%M")
+            .to_string()
+    }
+    pub fn last_seen_str(&self) -> String {
+        Self::fmt_ts(self.last_seen)
+    }
+    pub fn type_url(&self) -> Option<String> {
+        self.typecode
+            .as_deref()
+            .filter(|t| valid_designator(t))
+            .map(|t| format!("/type/{t}"))
+    }
+    pub fn ident(&self) -> String {
+        self.registration.clone().or_else(|| self.callsign.clone()).unwrap_or_else(|| self.hex.clone())
+    }
+}
+
+/// One continuous overhead pass.
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct VisitRecord {
+    pub hex: String,
+    pub registration: Option<String>,
+    pub typecode: Option<String>,
+    pub start_ts: f64,
+    pub end_ts: f64,
+    pub duration_secs: f64,
+    pub polls: i64,
+}
+
+impl VisitRecord {
+    fn fmt_ts(epoch: f64) -> String {
+        chrono::DateTime::from_timestamp(epoch as i64, 0)
+            .expect("valid ts")
+            .with_timezone(&chrono::Local)
+            .format("%Y-%m-%d %H:%M")
+            .to_string()
+    }
+    pub fn start_str(&self) -> String {
+        Self::fmt_ts(self.start_ts)
+    }
+    pub fn end_str(&self) -> String {
+        Self::fmt_ts(self.end_ts)
+    }
+    pub fn duration_str(&self) -> String {
+        let total_min = (self.duration_secs / 60.0).round() as i64;
+        let (h, m) = (total_min / 60, total_min % 60);
+        if h > 0 { format!("{h}h {m}m") } else { format!("{m}m") }
+    }
+    pub fn type_url(&self) -> Option<String> {
+        self.typecode
+            .as_deref()
+            .filter(|t| valid_designator(t))
+            .map(|t| format!("/type/{t}"))
+    }
+    pub fn ident(&self) -> String {
+        self.registration.clone().unwrap_or_else(|| self.hex.clone())
+    }
+}
+
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct YearRecord {
+    pub hex: String,
+    pub registration: Option<String>,
+    pub typecode: Option<String>,
+    pub year: i64,
+}
+
+impl YearRecord {
+    pub fn year_str(&self) -> String {
+        self.year.to_string()
+    }
+    pub fn type_url(&self) -> Option<String> {
+        self.typecode
+            .as_deref()
+            .filter(|t| valid_designator(t))
+            .map(|t| format!("/type/{t}"))
+    }
+    pub fn ident(&self) -> String {
+        self.registration.clone().unwrap_or_else(|| self.hex.clone())
+    }
+}
+
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct CallsignRecord {
+    pub callsign: String,
+    pub airframes: i64,
+    pub sightings: i64,
+}
+
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct RarestType {
+    pub designator: String,
+    pub name: String,
+    pub caught: i64,
+    pub registered: i64,
+    pub pct: Option<f64>,
+}
+
+impl RarestType {
+    pub fn pct_str(&self) -> String {
+        self.pct.map(|p| format!("{p:.1}%")).unwrap_or_else(|| "-".into())
+    }
+}
+
+#[derive(Debug, Default, serde::Serialize)]
+pub struct Records {
+    pub one_hit_count: i64,
+    pub one_hits: Vec<RarityRow>,
+    pub longest_visits: Vec<VisitRecord>,
+    pub steepest_climbs: Vec<Record>,
+    pub steepest_descents: Vec<Record>,
+    pub oldest: Vec<YearRecord>,
+    pub rarest_types: Vec<RarestType>,
+    pub top_callsigns: Vec<CallsignRecord>,
+}
+
+pub fn records(db: &Db) -> rusqlite::Result<Records> {
+    // `type_dex` takes the DB lock itself, so resolve it before locking here:
+    // the shared connection mutex is not reentrant.
+    let dex = type_dex(db)?;
+    let conn = crate::db_lock(db);
+    let one_hit_count: i64 = conn.query_row(
+        "SELECT COUNT(*) FROM aircraft a
+         WHERE (SELECT COUNT(*) FROM visits v WHERE v.hex = a.hex) = 1",
+        [],
+        |r| r.get(0),
+    )?;
+    let one_hits = {
+        let mut stmt = conn.prepare(
+            "SELECT a.hex, coalesce(nullif(e.registration,''), n.registration),
+                    coalesce(nullif(e.typecode,''), n.typecode), a.last_flight,
+                    a.first_seen, a.last_seen, a.sightings
+             FROM aircraft a
+             LEFT JOIN enrichment e ON e.icao24 = a.hex
+             LEFT JOIN network_enrichment n ON n.hex = a.hex
+             WHERE (SELECT COUNT(*) FROM visits v WHERE v.hex = a.hex) = 1
+             ORDER BY a.last_seen DESC LIMIT 20",
+        )?;
+        let rows = stmt
+            .query_map([], |r| {
+                Ok(RarityRow {
+                    hex: r.get(0)?,
+                    registration: r.get(1)?,
+                    typecode: r.get(2)?,
+                    callsign: r.get(3)?,
+                    first_seen: r.get(4)?,
+                    last_seen: r.get(5)?,
+                    sightings: r.get(6)?,
+                })
+            })?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        rows
+    };
+    let longest_visits = {
+        let mut stmt = conn.prepare(
+            "SELECT v.hex, coalesce(nullif(e.registration,''), n.registration),
+                    coalesce(nullif(e.typecode,''), n.typecode),
+                    v.start_ts, v.end_ts, v.end_ts - v.start_ts AS dur, v.polls
+             FROM visits v
+             LEFT JOIN enrichment e ON e.icao24 = v.hex
+             LEFT JOIN network_enrichment n ON n.hex = v.hex
+             ORDER BY dur DESC LIMIT 10",
+        )?;
+        let rows = stmt
+            .query_map([], |r| {
+                Ok(VisitRecord {
+                    hex: r.get(0)?,
+                    registration: r.get(1)?,
+                    typecode: r.get(2)?,
+                    start_ts: r.get(3)?,
+                    end_ts: r.get(4)?,
+                    duration_secs: r.get(5)?,
+                    polls: r.get(6)?,
+                })
+            })?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        rows
+    };
+    let current_year = chrono::Local::now().format("%Y").to_string().parse::<i64>().unwrap_or(2026);
+    let oldest = {
+        let mut stmt = conn.prepare(
+            "SELECT a.hex, coalesce(nullif(e.registration,''), n.registration),
+                    coalesce(nullif(e.typecode,''), n.typecode),
+                    CAST(substr(coalesce(nullif(e.built,''), n.year), 1, 4) AS INTEGER) AS year
+             FROM aircraft a
+             LEFT JOIN enrichment e ON e.icao24 = a.hex
+             LEFT JOIN network_enrichment n ON n.hex = a.hex
+             WHERE year BETWEEN 1900 AND ?1
+             ORDER BY year ASC, a.hex LIMIT 10",
+        )?;
+        let rows = stmt
+            .query_map(params![current_year], |r| {
+                Ok(YearRecord {
+                    hex: r.get(0)?,
+                    registration: r.get(1)?,
+                    typecode: r.get(2)?,
+                    year: r.get(3)?,
+                })
+            })?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        rows
+    };
+    let mut rarest_types: Vec<RarestType> = dex
+        .into_iter()
+        .filter(|t| t.caught > 0)
+        .map(|t| RarestType {
+            designator: t.designator.clone(),
+            name: t.display_name(),
+            caught: t.caught,
+            registered: t.registered,
+            pct: (t.registered > 0).then(|| t.caught as f64 * 100.0 / t.registered as f64),
+        })
+        .collect();
+    rarest_types.sort_by(|a, b| {
+        let rank = |r: &RarestType| {
+            if r.registered > 0 { r.caught as f64 / r.registered as f64 } else { 1.0 }
+        };
+        rank(a)
+            .partial_cmp(&rank(b))
+            .unwrap_or(std::cmp::Ordering::Equal)
+            .then_with(|| b.caught.cmp(&a.caught))
+    });
+    rarest_types.truncate(10);
+    let top_callsigns = {
+        let mut stmt = conn.prepare(
+            "SELECT callsign, COUNT(DISTINCT hex), SUM(sightings)
+             FROM aircraft_callsigns GROUP BY callsign
+             ORDER BY 2 DESC, 3 DESC LIMIT 10",
+        )?;
+        let rows = stmt
+            .query_map([], |r| {
+                Ok(CallsignRecord { callsign: r.get(0)?, airframes: r.get(1)?, sightings: r.get(2)? })
+            })?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        rows
+    };
+    Ok(Records {
+        one_hit_count,
+        one_hits,
+        longest_visits,
+        steepest_climbs: records_by(&conn, "a.max_baro_rate", "DESC", 5)?,
+        steepest_descents: records_by(&conn, "a.min_baro_rate", "ASC", 5)?,
+        oldest,
+        rarest_types,
+        top_callsigns,
+    })
+}
+
+/// When an aircraft usually passes and how many days it has been heard.
+#[derive(Debug, Default, Clone, serde::Serialize)]
+pub struct Schedule {
+    /// Visit starts per local hour, always 24 buckets.
+    pub hours: Vec<HourBucket>,
+    pub max_count: i64,
+    pub days_heard: i64,
+    pub current_streak: i64,
+    pub longest_streak: i64,
+    pub typical_hour: Option<u32>,
+    pub first_day: Option<String>,
+    pub last_day: Option<String>,
+}
+
+impl Schedule {
+    pub fn typical_str(&self) -> String {
+        self.typical_hour.map(|h| format!("{h:02}:00")).unwrap_or_else(|| "-".into())
+    }
+}
+
+/// Current and longest run of consecutive days. `current` counts a run that
+/// ended yesterday too, so the streak does not reset at midnight before the
+/// aircraft has had a chance to appear today.
+pub fn streaks(days: &[chrono::NaiveDate], today: chrono::NaiveDate) -> (i64, i64) {
+    if days.is_empty() {
+        return (0, 0);
+    }
+    let mut sorted = days.to_vec();
+    sorted.sort_unstable();
+    sorted.dedup();
+    let mut longest = 1i64;
+    let mut run = 1i64;
+    for pair in sorted.windows(2) {
+        if pair[0].succ_opt() == Some(pair[1]) {
+            run += 1;
+            longest = longest.max(run);
+        } else {
+            run = 1;
+        }
+    }
+    let last = *sorted.last().expect("non-empty");
+    let current = if last == today {
+        run
+    } else if last.succ_opt() == Some(today) {
+        // The last run ended yesterday; keep counting it.
+        let mut n = 1i64;
+        for pair in sorted.windows(2).rev() {
+            if pair[0].succ_opt() == Some(pair[1]) {
+                n += 1;
+            } else {
+                break;
+            }
+        }
+        n
+    } else {
+        0
+    };
+    (current, longest)
+}
+
+pub fn schedule_for(db: &Db, hex: &str) -> rusqlite::Result<Schedule> {
+    let conn = crate::db_lock(db);
+    let mut hours: Vec<HourBucket> = (0..24).map(|hour| HourBucket { hour, count: 0 }).collect();
+    let mut stmt = conn.prepare("SELECT start_ts FROM visits WHERE hex = ?1")?;
+    let rows = stmt.query_map(params![hex], |r| r.get::<_, f64>(0))?;
+    for row in rows {
+        let ts = row?;
+        if let Some(dt) = chrono::DateTime::from_timestamp(ts as i64, 0) {
+            let hour = dt.with_timezone(&chrono::Local).hour() as usize;
+            if let Some(b) = hours.get_mut(hour) {
+                b.count += 1;
+            }
+        }
+    }
+    let max_count = hours.iter().map(|h| h.count).max().unwrap_or(0);
+    let typical_hour = hours
+        .iter()
+        .enumerate()
+        .max_by_key(|(_, b)| b.count)
+        .filter(|(_, b)| b.count > 0)
+        .map(|(i, _)| i as u32);
+
+    let days: Vec<chrono::NaiveDate> = {
+        let mut stmt = conn.prepare(
+            "SELECT DISTINCT day FROM day_aircraft WHERE hex = ?1 ORDER BY day",
+        )?;
+        let rows = stmt.query_map(params![hex], |r| r.get::<_, String>(0))?;
+        rows.filter_map(|r| r.ok())
+            .filter_map(|d| chrono::NaiveDate::parse_from_str(&d, "%Y-%m-%d").ok())
+            .collect()
+    };
+    let today = chrono::Local::now().date_naive();
+    let (current_streak, longest_streak) = streaks(&days, today);
+    Ok(Schedule {
+        hours,
+        max_count,
+        days_heard: days.len() as i64,
+        current_streak,
+        longest_streak,
+        typical_hour,
+        first_day: days.first().map(|d| d.format("%Y-%m-%d").to_string()),
+        last_day: days.last().map(|d| d.format("%Y-%m-%d").to_string()),
+    })
+}
+
 impl Record {
     pub fn label(&self) -> String {
         match self.hex.parse::<i64>() {
@@ -235,6 +766,10 @@ impl Record {
     }
     pub fn value_str(&self) -> String {
         fmt_num(self.value)
+    }
+    /// Magnitude, for a descent row whose label already names the direction.
+    pub fn abs_value_str(&self) -> String {
+        fmt_num(self.value.abs())
     }
     /// Human identity for a record holder: registration or callsign, plus type.
     pub fn ident(&self) -> String {
@@ -257,7 +792,8 @@ const COLS: &str = "a.hex, a.first_seen, a.last_seen, a.sightings, a.last_flight
                     a.last_nav_alt_ft, a.last_nav_heading, a.last_emergency, \
                     coalesce(nullif(e.registration,''), n.registration), \
                     coalesce(nullif(e.typecode,''), n.typecode), \
-                    a.last_alt_ft, a.last_gs_kts, a.last_range_nm, a.last_baro_rate, a.last_msg_age";
+                    a.last_alt_ft, a.last_gs_kts, a.last_range_nm, a.last_baro_rate, a.last_msg_age, \
+                    a.country";
 const FROM: &str = "FROM aircraft a LEFT JOIN enrichment e ON e.icao24 = a.hex \
                     LEFT JOIN network_enrichment n ON n.hex = a.hex";
 
@@ -322,6 +858,8 @@ pub struct FleetFilter {
     pub dormant: bool,
     pub alt_min: Option<i64>,
     pub alt_max: Option<i64>,
+    /// ISO 3166-1 alpha-2 state of registry, "" = any.
+    pub country: String,
 }
 
 /// Local calendar day (`YYYY-MM-DD`) for an epoch timestamp. Matches the
@@ -418,6 +956,9 @@ impl FleetFilter {
         if let Some(v) = self.alt_max {
             out.push(format!("max altitude \u{2264} {v} ft"));
         }
+        if !self.country.is_empty() {
+            out.push(crate::country::name(&self.country).to_string());
+        }
         out
     }
 
@@ -482,6 +1023,10 @@ impl FleetFilter {
         if let Some(v) = self.alt_max {
             clauses.push("a.max_alt_ft <= :alt_max");
             params.push((":alt_max", Value::Integer(v)));
+        }
+        if !self.country.is_empty() {
+            clauses.push("a.country = :country");
+            params.push((":country", Value::Text(self.country.clone())));
         }
 
         let where_clause =
@@ -705,6 +1250,16 @@ impl PollerHealth {
             "live" => format!("live · {}", self.age_phrase()),
             "stale" => format!("stalled · {}", self.age_phrase()),
             _ => format!("poller down · {}", self.age_phrase()),
+        }
+    }
+
+    /// The pill's text when the header has no room for the age: the state
+    /// word alone. The age stays in the `title`; the dot carries the colour.
+    pub fn short_label(&self) -> &'static str {
+        match self.state() {
+            "live" => "live",
+            "stale" => "stalled",
+            _ => "down",
         }
     }
 
@@ -1210,11 +1765,110 @@ pub fn messages_by_day(db: &Db, now: f64) -> rusqlite::Result<Vec<DayValue>> {
     rows.collect()
 }
 
+/// Unique aircraft per local day, last 90 days, from the daily ledger.
+pub fn unique_by_day(db: &Db, now: f64) -> rusqlite::Result<Vec<DayValue>> {
+    let conn = crate::db_lock(db);
+    let cutoff = local_day(now - (RANGE_DAYS - 1) as f64 * 86_400.0);
+    let mut stmt = conn.prepare(
+        "SELECT day, COUNT(*) FROM day_aircraft
+         WHERE day >= ?1 GROUP BY day ORDER BY day",
+    )?;
+    let rows = stmt.query_map(params![cutoff], |r| {
+        Ok(DayValue { day: r.get(0)?, value: r.get(1)? })
+    })?;
+    rows.collect()
+}
+
+/// Aircraft first seen per local day, last 90 days. This covers the full
+/// `aircraft` history, unlike the ledger-backed series.
+pub fn new_by_day(db: &Db, now: f64) -> rusqlite::Result<Vec<DayValue>> {
+    let conn = crate::db_lock(db);
+    let cutoff = now - (RANGE_DAYS - 1) as f64 * 86_400.0;
+    let mut stmt = conn.prepare(
+        "SELECT strftime('%Y-%m-%d', first_seen, 'unixepoch', 'localtime') AS day,
+                COUNT(*)
+         FROM aircraft WHERE first_seen >= ?1
+         GROUP BY day ORDER BY day",
+    )?;
+    let rows = stmt.query_map(params![cutoff], |r| {
+        Ok(DayValue { day: r.get(0)?, value: r.get(1)? })
+    })?;
+    rows.collect()
+}
+
+/// One day of network coverage. `cover_pct` is `None` when the local poller
+/// was down that day: a gap, not 0%.
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct CoverageDay {
+    pub day: String,
+    pub network: i64,
+    pub local: i64,
+    pub overlap: i64,
+    pub cover_pct: Option<f64>,
+}
+
+impl CoverageDay {
+    pub fn cover_str(&self) -> Option<String> {
+        self.cover_pct.map(|p| format!("{p:.0}"))
+    }
+}
+
+pub fn coverage_by_day(db: &Db, now: f64) -> rusqlite::Result<Vec<CoverageDay>> {
+    let conn = crate::db_lock(db);
+    let cutoff = local_day(now - (RANGE_DAYS - 1) as f64 * 86_400.0);
+    let cutoff_ts = now - (RANGE_DAYS - 1) as f64 * 86_400.0;
+    let mut stmt = conn.prepare(
+        "WITH net AS (
+           SELECT day, COUNT(*) n FROM network_day_aircraft
+           WHERE day >= :cutoff GROUP BY day
+         ), loc AS (
+           SELECT day, COUNT(*) l FROM day_aircraft
+           WHERE day >= :cutoff AND max_alt_ft IS NOT NULL GROUP BY day
+         ), ov AS (
+           SELECT d.day, COUNT(*) o FROM day_aircraft d
+           JOIN network_day_aircraft n ON n.day = d.day AND n.hex = d.hex
+           WHERE d.day >= :cutoff AND d.max_alt_ft IS NOT NULL GROUP BY d.day
+         ), up AS (
+           SELECT strftime('%Y-%m-%d', ts, 'unixepoch', 'localtime') day,
+                  COUNT(*) polls
+           FROM poll_log WHERE ts >= :cutoff_ts GROUP BY 1
+         )
+         SELECT net.day, net.n, coalesce(loc.l, 0), coalesce(ov.o, 0),
+                coalesce(up.polls, 0)
+         FROM net
+         LEFT JOIN loc ON loc.day = net.day
+         LEFT JOIN ov  ON ov.day  = net.day
+         LEFT JOIN up  ON up.day  = net.day
+         ORDER BY net.day",
+    )?;
+    let rows = stmt.query_map(
+        rusqlite::named_params! { ":cutoff": cutoff, ":cutoff_ts": cutoff_ts },
+        |r| {
+            let network: i64 = r.get(1)?;
+            let local: i64 = r.get(2)?;
+            let overlap: i64 = r.get(3)?;
+            let polls: i64 = r.get(4)?;
+            Ok(CoverageDay {
+                day: r.get(0)?,
+                network,
+                local,
+                overlap,
+                cover_pct: (polls > 0 && network > 0)
+                    .then(|| overlap as f64 * 100.0 / network as f64),
+            })
+        },
+    )?;
+    rows.collect()
+}
+
 #[derive(Debug, serde::Serialize)]
 pub struct Activity {
     pub heatmap: Heatmap,
     pub range: Vec<DayValue>,
     pub messages: Vec<DayValue>,
+    pub unique: Vec<DayValue>,
+    pub new: Vec<DayValue>,
+    pub coverage: Vec<CoverageDay>,
 }
 
 pub fn activity(db: &Db, now: f64) -> rusqlite::Result<Activity> {
@@ -1222,6 +1876,9 @@ pub fn activity(db: &Db, now: f64) -> rusqlite::Result<Activity> {
         heatmap: weekday_hour_heatmap(db)?,
         range: range_by_day(db, now)?,
         messages: messages_by_day(db, now)?,
+        unique: unique_by_day(db, now)?,
+        new: new_by_day(db, now)?,
+        coverage: coverage_by_day(db, now)?,
     })
 }
 
@@ -1274,14 +1931,20 @@ impl LineChart {
     /// One point per day, evenly spaced. Missing days compress rather than
     /// leaving calendar gaps, so the line stays readable on a sparse ledger.
     pub fn build(series: &[DayValue]) -> Self {
+        Self::build_bounded(series, None, None)
+    }
+
+    /// Same as `build`, but with a fixed y-axis range (e.g. 0–100% coverage).
+    /// A 60–80% series then sits in the upper half instead of filling the plot.
+    pub fn build_bounded(series: &[DayValue], min_bound: Option<f64>, max_bound: Option<f64>) -> Self {
         let (width, height) = (CHART_W, CHART_H);
         if series.is_empty() {
             return Self {
                 path: String::new(),
                 area: String::new(),
                 points: Vec::new(),
-                min: 0.0,
-                max: 0.0,
+                min: min_bound.unwrap_or(0.0),
+                max: max_bound.unwrap_or(0.0),
                 first_label: String::new(),
                 last_label: String::new(),
                 width,
@@ -1291,8 +1954,13 @@ impl LineChart {
                 plot_right: 0.0,
             };
         }
-        let min = series.iter().map(|d| d.value).fold(f64::INFINITY, f64::min);
-        let max = series.iter().map(|d| d.value).fold(f64::NEG_INFINITY, f64::max);
+        let (min, max) = match (min_bound, max_bound) {
+            (Some(lo), Some(hi)) => (lo, hi),
+            _ => (
+                series.iter().map(|d| d.value).fold(f64::INFINITY, f64::min),
+                series.iter().map(|d| d.value).fold(f64::NEG_INFINITY, f64::max),
+            ),
+        };
         let flat = max - min < f64::EPSILON;
         let span = if flat { 1.0 } else { max - min };
         let n = series.len();
@@ -1455,6 +2123,161 @@ pub struct Record {
     pub typecode: Option<String>,
 }
 
+/// One state of registry and how many aircraft in the ledger carry it.
+#[derive(Debug, Default, Clone, serde::Serialize)]
+pub struct CountryCount {
+    pub code: String,
+    pub name: String,
+    pub count: i64,
+}
+
+impl CountryCount {
+    pub fn flag(&self) -> String {
+        crate::country::flag(&self.code)
+    }
+}
+
+pub fn country_counts(db: &Db) -> rusqlite::Result<Vec<CountryCount>> {
+    let conn = crate::db_lock(db);
+    let mut stmt = conn.prepare(
+        "SELECT country, COUNT(*) FROM aircraft
+         WHERE country IS NOT NULL AND country <> ''
+         GROUP BY country ORDER BY 2 DESC, 1",
+    )?;
+    let rows = stmt.query_map([], |r| {
+        let code: String = r.get(0)?;
+        Ok(CountryCount { name: crate::country::name(&code).to_string(), code, count: r.get(1)? })
+    })?;
+    rows.collect()
+}
+
+/// One state of registry as the `/countries` page ranks it. `share` is the
+/// fraction of all airframes whose country is known, so the rows always sum to 1.
+#[derive(Debug, Default, Clone, serde::Serialize)]
+pub struct CountryRow {
+    pub code: String,
+    pub name: String,
+    pub count: i64,
+    /// Distinct ICAO type designators among this country's airframes.
+    pub types: i64,
+    pub best_range_nm: Option<f64>,
+    pub last_seen: f64,
+    pub share: f64,
+}
+
+impl CountryRow {
+    pub fn flag(&self) -> String {
+        crate::country::flag(&self.code)
+    }
+    /// `/` with the fleet's country filter, e.g. `/?country=CA`.
+    pub fn fleet_url(&self) -> String {
+        format!("/?country={}", self.code)
+    }
+    pub fn share_pct(&self) -> String {
+        format!("{:.1}%", self.share * 100.0)
+    }
+    /// Bar width, with a 2% floor so a one-aircraft country still draws a mark.
+    pub fn bar_pct(&self) -> f64 {
+        let pct = (self.share * 100.0).clamp(2.0, 100.0);
+        (pct * 10.0).round() / 10.0
+    }
+    pub fn range_str(&self) -> String {
+        self.best_range_nm.map(fmt_num).unwrap_or_else(|| "-".into())
+    }
+    pub fn last_seen_str(&self) -> String {
+        chrono::DateTime::from_timestamp(self.last_seen as i64, 0)
+            .expect("valid ts")
+            .with_timezone(&chrono::Local)
+            .format("%Y-%m-%d")
+            .to_string()
+    }
+}
+
+/// Sort keys accepted by `/countries` and `/api/countries`.
+const COUNTRY_SORTS: &[&str] = &["count", "name", "recent", "range"];
+
+/// Fold the accents in the committed country names so A–Z matches an English
+/// reader: "Côte d’Ivoire" files under C-o, not after C-r.
+fn country_sort_key(name: &str) -> String {
+    name.chars()
+        .map(|c| match c {
+            'à' | 'á' | 'â' | 'ã' | 'ä' | 'å' => 'a',
+            'ç' => 'c',
+            'è' | 'é' | 'ê' | 'ë' => 'e',
+            'ì' | 'í' | 'î' | 'ï' => 'i',
+            'ñ' => 'n',
+            'ò' | 'ó' | 'ô' | 'õ' | 'ö' => 'o',
+            'ù' | 'ú' | 'û' | 'ü' => 'u',
+            'ý' | 'ÿ' => 'y',
+            '’' => '\'',
+            _ => c,
+        })
+        .flat_map(char::to_lowercase)
+        .collect()
+}
+
+pub fn country_rows(db: &Db, sort: &str) -> rusqlite::Result<Vec<CountryRow>> {
+    let sort = if COUNTRY_SORTS.contains(&sort) { sort } else { "count" };
+    let conn = crate::db_lock(db);
+    let mut stmt = conn.prepare(
+        "SELECT a.country, COUNT(*),
+                COUNT(DISTINCT coalesce(nullif(e.typecode,''), nullif(n.typecode,''))),
+                MAX(a.max_range_nm), MAX(a.last_seen)
+         FROM aircraft a
+         LEFT JOIN enrichment e ON e.icao24 = a.hex
+         LEFT JOIN network_enrichment n ON n.hex = a.hex
+         WHERE a.country IS NOT NULL AND a.country <> ''
+         GROUP BY a.country",
+    )?;
+    let mut rows: Vec<CountryRow> = stmt
+        .query_map([], |r| {
+            let code: String = r.get(0)?;
+            Ok(CountryRow {
+                name: crate::country::name(&code).to_string(),
+                code,
+                count: r.get(1)?,
+                types: r.get(2)?,
+                best_range_nm: r.get(3)?,
+                last_seen: r.get(4)?,
+                share: 0.0,
+            })
+        })?
+        .collect::<rusqlite::Result<_>>()?;
+    drop(stmt);
+
+    match sort {
+        "name" => rows.sort_by_cached_key(|r| country_sort_key(&r.name)),
+        "recent" => rows.sort_by(|a, b| {
+            b.last_seen
+                .partial_cmp(&a.last_seen)
+                .unwrap_or(std::cmp::Ordering::Equal)
+                .then_with(|| b.count.cmp(&a.count))
+                .then_with(|| country_sort_key(&a.name).cmp(&country_sort_key(&b.name)))
+        }),
+        "range" => rows.sort_by(|a, b| {
+            b.best_range_nm
+                .unwrap_or(-1.0)
+                .partial_cmp(&a.best_range_nm.unwrap_or(-1.0))
+                .unwrap_or(std::cmp::Ordering::Equal)
+                .then_with(|| b.count.cmp(&a.count))
+                .then_with(|| country_sort_key(&a.name).cmp(&country_sort_key(&b.name)))
+        }),
+        _ => rows.sort_by(|a, b| {
+            b.count
+                .cmp(&a.count)
+                .then_with(|| country_sort_key(&a.name).cmp(&country_sort_key(&b.name)))
+        }),
+    }
+
+    let total: i64 = rows.iter().map(|r| r.count).sum();
+    if total > 0 {
+        for row in &mut rows {
+            row.share = row.count as f64 / total as f64;
+        }
+    }
+    Ok(rows)
+}
+
 #[derive(Debug, Default, Clone, serde::Serialize)]
 pub struct Stats {
     pub total_aircraft: i64,
@@ -1475,6 +2298,9 @@ pub struct Stats {
     pub top_operator: Option<Record>, // value = distinct airframes, hex = operator name
     pub top_airframe: Option<Record>, // value = polls seen, hex = aircraft hex
     pub busiest_day: Option<Record>,  // value = peak aircraft count, hex = day label
+    /// Distinct states of registry in the ledger.
+    pub countries: i64,
+    pub top_country: Option<CountryCount>,
 }
 
 impl Stats {
@@ -1512,6 +2338,12 @@ fn record(conn: &Connection, what: &str) -> rusqlite::Result<Option<Record>> {
         "signal" => "a.max_rssi_dbfs",
         _ => unreachable!(),
     };
+    Ok(records_by(conn, col, "DESC", 1)?.into_iter().next())
+}
+
+/// Top `limit` aircraft for a metric column, in `order` (`DESC` for best,
+/// `ASC` for the most negative). `col` is a fixed column, never user input.
+fn records_by(conn: &Connection, col: &str, order: &str, limit: u32) -> rusqlite::Result<Vec<Record>> {
     let sql = format!(
         "SELECT a.hex, {col},
                 coalesce(nullif(e.registration,''), n.registration),
@@ -1520,9 +2352,10 @@ fn record(conn: &Connection, what: &str) -> rusqlite::Result<Option<Record>> {
          FROM aircraft a
          LEFT JOIN enrichment e ON e.icao24 = a.hex
          LEFT JOIN network_enrichment n ON n.hex = a.hex
-         WHERE {col} IS NOT NULL ORDER BY {col} DESC LIMIT 1"
+         WHERE {col} IS NOT NULL ORDER BY {col} {order} LIMIT ?1"
     );
-    conn.query_row(&sql, [], |r| {
+    let mut stmt = conn.prepare(&sql)?;
+    let rows = stmt.query_map(params![limit], |r| {
         let registration: Option<String> = r.get(2)?;
         let callsign: Option<String> = r.get(4)?;
         Ok(Record {
@@ -1531,8 +2364,8 @@ fn record(conn: &Connection, what: &str) -> rusqlite::Result<Option<Record>> {
             name: registration.or(callsign),
             typecode: r.get(3)?,
         })
-    })
-    .optional()
+    })?;
+    rows.collect()
 }
 
 /// `Stats` is 16 queries over all-time aggregates; the cards tick asks for it
@@ -1664,6 +2497,28 @@ pub fn stats(db: &Db, now: f64) -> rusqlite::Result<Stats> {
         )
         .optional()?;
 
+    let countries: i64 = conn.query_row(
+        "SELECT COUNT(DISTINCT country) FROM aircraft WHERE country IS NOT NULL AND country <> ''",
+        [],
+        |r| r.get(0),
+    )?;
+    let top_country: Option<CountryCount> = conn
+        .query_row(
+            "SELECT country, COUNT(*) FROM aircraft
+             WHERE country IS NOT NULL AND country <> ''
+             GROUP BY country ORDER BY 2 DESC, 1 LIMIT 1",
+            [],
+            |r| {
+                let code: String = r.get(0)?;
+                Ok(CountryCount {
+                    name: crate::country::name(&code).to_string(),
+                    code,
+                    count: r.get(1)?,
+                })
+            },
+        )
+        .optional()?;
+
     Ok(Stats {
         total_aircraft,
         currently_airborne,
@@ -1682,6 +2537,8 @@ pub fn stats(db: &Db, now: f64) -> rusqlite::Result<Stats> {
         top_operator,
         top_airframe,
         busiest_day,
+        countries,
+        top_country,
     })
 }
 
@@ -2331,6 +3188,7 @@ pub struct TypeAirframe {
     pub max_alt_ft: Option<i64>,
     pub max_gs_kts: Option<f64>,
     pub max_range_nm: Option<f64>,
+    pub country: Option<String>,
 }
 
 impl TypeAirframe {
@@ -2355,6 +3213,15 @@ impl TypeAirframe {
             .unwrap_or("-")
             .to_string()
     }
+    pub fn country_code(&self) -> &str {
+        self.country.as_deref().unwrap_or("-")
+    }
+    pub fn country_name(&self) -> String {
+        self.country.as_deref().map(crate::country::name).unwrap_or("-").to_string()
+    }
+    pub fn country_flag(&self) -> String {
+        self.country.as_deref().map(crate::country::flag).unwrap_or_default()
+    }
 }
 
 #[derive(Debug, serde::Serialize)]
@@ -2378,7 +3245,7 @@ pub fn type_detail(db: &Db, code: &str) -> rusqlite::Result<Option<TypeDetail>> 
     let mut stmt = conn.prepare(
         "SELECT a.hex, e.registration, e.operator, e.owner,
                 a.first_seen, a.last_seen, a.sightings,
-                a.max_alt_ft, a.max_gs_kts, a.max_range_nm
+                a.max_alt_ft, a.max_gs_kts, a.max_range_nm, a.country
          FROM aircraft a CROSS JOIN enrichment e ON e.icao24 = a.hex
          WHERE e.typecode = ?1 ORDER BY a.last_seen DESC",
     )?;
@@ -2395,6 +3262,7 @@ pub fn type_detail(db: &Db, code: &str) -> rusqlite::Result<Option<TypeDetail>> 
                 max_alt_ft: r.get(7)?,
                 max_gs_kts: r.get(8)?,
                 max_range_nm: r.get(9)?,
+                country: r.get(10)?,
             })
         })?
         .collect::<rusqlite::Result<Vec<_>>>()?;
@@ -2456,6 +3324,87 @@ pub fn type_dex_summary(db: &Db) -> rusqlite::Result<TypeDexSummary> {
 mod tests {
     use super::PollerHealth;
 
+    #[test]
+    fn sector_boundaries() {
+        assert_eq!(super::sector_for_bearing(0.0), 0);
+        assert_eq!(super::sector_for_bearing(9.99), 0);
+        assert_eq!(super::sector_for_bearing(10.0), 1);
+        assert_eq!(super::sector_for_bearing(359.9), 35);
+        assert_eq!(super::sector_for_bearing(360.0), 0);
+    }
+
+    #[test]
+    fn polar_geometry_puts_north_up_and_east_right() {
+        let mut values = [0.0f64; 36];
+        values[0] = 100.0;
+        values[9] = 100.0;
+        let (points, path) = super::polar_points(&values, 100.0);
+        assert_eq!(points[0].x, super::POLAR_CENTER);
+        assert_eq!(points[0].y, super::POLAR_CENTER - super::POLAR_RADIUS);
+        assert!((points[9].x - (super::POLAR_CENTER + super::POLAR_RADIUS)).abs() < 1e-9);
+        assert!((points[9].y - super::POLAR_CENTER).abs() < 1e-9);
+        assert!(path.starts_with("M 180.0,180.0"));
+        assert!(path.ends_with(" Z"));
+    }
+
+    #[test]
+    fn empty_polar_has_no_path_and_no_nan() {
+        let (points, path) = super::polar_points(&[0.0; 36], 0.0);
+        assert!(path.is_empty());
+        assert_eq!(points.len(), 36);
+        assert!(points.iter().all(|p| p.x.is_finite() && p.y.is_finite()));
+        assert!(points.iter().all(|p| p.x == super::POLAR_CENTER && p.y == super::POLAR_CENTER));
+    }
+
+    #[test]
+    fn bounded_chart_keeps_percentages_in_the_upper_half() {
+        let series = vec![
+            super::DayValue { day: "2026-01-01".into(), value: 60.0 },
+            super::DayValue { day: "2026-01-02".into(), value: 80.0 },
+        ];
+        let chart = super::LineChart::build_bounded(&series, Some(0.0), Some(100.0));
+        assert_eq!(chart.min, 0.0);
+        assert_eq!(chart.max, 100.0);
+        assert!(chart.points.iter().all(|p| p.y < chart.height / 2.0));
+        assert_eq!(chart.y_labels.len(), 3);
+        assert_eq!(chart.y_labels[0].text, "100");
+        assert_eq!(chart.y_labels[2].text, "0");
+    }
+
+    #[test]
+    fn streaks_handle_gaps_and_midnight() {
+        use chrono::NaiveDate;
+        let d = |s: &str| NaiveDate::parse_from_str(s, "%Y-%m-%d").unwrap();
+        let today = d("2026-11-17");
+        assert_eq!(super::streaks(&[], today), (0, 0));
+        assert_eq!(super::streaks(&[d("2026-11-17")], today), (1, 1));
+        assert_eq!(
+            super::streaks(
+                &[d("2026-11-10"), d("2026-11-11"), d("2026-11-12"), d("2026-11-15")],
+                today
+            ),
+            (0, 3)
+        );
+        // Last seen yesterday: the streak survives until today's chance passes.
+        assert_eq!(
+            super::streaks(&[d("2026-11-14"), d("2026-11-15"), d("2026-11-16")], today),
+            (3, 3)
+        );
+        // Duplicate days do not inflate the run.
+        assert_eq!(
+            super::streaks(&[d("2026-11-16"), d("2026-11-16"), d("2026-11-17")], today),
+            (2, 2)
+        );
+        // A run ending today wins even when a longer old run exists.
+        assert_eq!(
+            super::streaks(
+                &[d("2026-11-01"), d("2026-11-02"), d("2026-11-03"), d("2026-11-17")],
+                today
+            ),
+            (1, 3)
+        );
+    }
+
     /// The pill's three states are what tells the operator the receiver died;
     /// the boundaries are the whole contract.
     #[test]
@@ -2497,6 +3446,17 @@ mod tests {
         assert_eq!(super::descent_str(Some(-1408)), "1408");
         assert_eq!(super::descent_str(Some(0)), "0");
         assert_eq!(super::descent_str(None), "-");
+    }
+
+    /// A–Z must read as English, not UTF-8: the committed country table has
+    /// names whose accents are multi-byte (`Côte d’Ivoire`, `Türkiye`).
+    #[test]
+    fn country_names_fold_for_az() {
+        let key = super::country_sort_key;
+        assert_eq!(key("Türkiye"), "turkiye");
+        assert_eq!(key("Côte d’Ivoire"), "cote d'ivoire");
+        assert!(key("Côte d’Ivoire") > key("Costa Rica"));
+        assert!(key("Côte d’Ivoire") < key("Croatia"));
     }
 
     /// OpenSky's `typecode` is free text. A row must link only when the

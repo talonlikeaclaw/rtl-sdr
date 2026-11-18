@@ -5,7 +5,10 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="theme-color" content="#060a15">
   <title>{{ detail.row.designator }} · {{ detail.row.display_name() }} — plane-stats</title>
+  <link rel="icon" href="/favicon.svg?v=1" type="image/svg+xml">
+  <link rel="icon" href="/favicon-32.png?v=1" sizes="32x32" type="image/png">
   <link rel="stylesheet" href="/app.css?v=2">
+  <script src="/app.js" defer></script>
 </head>
 <body>
   <a class="skip" href="#main">Skip to content</a>
@@ -27,16 +30,12 @@
         <div>
           <h1><span class="mono">{{ detail.row.designator }}</span> · {{ detail.row.display_name() }}</h1>
           <p class="tagline">{{ detail.row.category_str() }} · {{ detail.row.engine_str() }}{% if let Some(w) = detail.row.wtc_str() %} · WTC {{ w }}{% endif %}</p>
+          <p class="page-actions"><a href="/?q={{ detail.row.designator }}">In the fleet</a></p>
         </div>
       </div>
-      <nav class="hero-actions" aria-label="Primary">
-        <a class="pill" href="/">← Dashboard</a>
-        <a class="pill" href="/?q={{ detail.row.designator }}">In the fleet</a>
-        <a class="pill" href="/types">Type dex</a>
-        <a class="pill" href="/today">Today</a>
-        <a class="pill" href="/activity">Activity</a>
-        <a class="pill" href="{{ tar1090 }}/" target="_blank" rel="noopener">Open live map</a>
-      </nav>
+      <div class="hero-tools">
+        {% include "partials/nav.html" %}
+      </div>
     </header>
 
     <main id="main">
@@ -119,13 +118,14 @@
           <table>
             <caption class="sr-only">Every {{ detail.row.designator }} heard, most recent first</caption>
             <thead>
-              <tr><th>Hex</th><th>Registration</th><th>Operator</th><th>First seen</th><th>Last seen</th><th>Polls</th><th>Max alt</th><th>Max speed</th><th>Max range</th></tr>
+              <tr><th>Hex</th><th>Registration</th><th>Country</th><th>Operator</th><th>First seen</th><th>Last seen</th><th>Polls</th><th>Max alt</th><th>Max speed</th><th>Max range</th></tr>
             </thead>
             <tbody>
               {% for a in detail.airframes %}
               <tr>
                 <td class="hex mono"><a href="/aircraft/{{ a.hex }}">{{ a.hex }}</a></td>
                 <td class="mono">{{ a.registration.as_deref().unwrap_or("-") }}</td>
+                <td title="{{ a.country_name() }}">{% if a.country.is_some() %}{{ a.country_flag() }} <span class="mono">{{ a.country_code() }}</span>{% else %}-{% endif %}</td>
                 <td>{{ a.operator_str() }}</td>
                 <td>{{ a.first_seen_str() }}</td>
                 <td>{{ a.last_seen_str() }}</td>

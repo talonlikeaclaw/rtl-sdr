@@ -663,6 +663,654 @@ day table.
 
 ---
 
+## Step 9 — Country of registration
+
+**Goal:** every aircraft gets its state of registry from its ICAO 24-bit
+address; show it on the profile, in the fleet table, as a dashboard card, and
+as a fleet filter.
+
+**Files:** new `src/country.rs`; `src/main.rs` (mod, column, backfill);
+`src/poller.rs`; `src/stats.rs`; `src/web.rs`; `templates/index.html`;
+`templates/partials/table.html`; `templates/partials/table_row.html`;
+`templates/partials/cards.html`; `templates/aircraft.html`; `static/app.css`;
+`README.md`; `AGENTS.md`.
+
+**Backup first:** this is a schema step.
+
+**Data source:** ICAO Annex 10 Vol III, Table 9-1 (Amendment 92, effective
+2024-07-22). A machine-readable copy is
+`ibosoftnet/icao-aircraft-addresses`, file
+`Hexadecimal Addresses (Amendment 92).csv` (`state,noOfAddr,startAddr,endAddr`;
+`noOfAddr` is hex — ignore it and use the start/end columns). Generate a sorted
+const once and commit it; do not fetch at runtime:
+
+```rust
+// (start, end, ISO 3166-1 alpha-2, state name), inclusive, sorted by start.
+pub(crate) const BLOCKS: &[(u32, u32, &str, &str)] = &[
+    (0x700000, 0x700fff, "AF", "Afghanistan"),
+    // ... ~196 rows ...
+    (0xa00000, 0xafffff, "US", "United States"),
+];
+```
+
+Map the CSV's state names to ISO alpha-2 once while generating the table; use
+`""` for entries with no ISO code (e.g. Kosovo) so those rows show the name
+without a flag.
+
+**`src/country.rs`:**
+
+```rust
+pub(crate) fn code_for_hex(hex: &str) -> Option<&'static str>; // ISO2
+pub(crate) fn name(code: &str) -> &'static str;
+pub(crate) fn flag(code: &str) -> String; // regional indicators; "" if not 2 ASCII letters
+pub(crate) fn backfill(db: &Db) -> rusqlite::Result<usize>;
+```
+
+- `code_for_hex`: parse the hex as `u32`, binary-search `BLOCKS` by start
+  (`partition_point`), then check `addr <= end`. Malformed/non-ICAO input
+  (`~`-prefixed) returns `None`.
+- `backfill`: mirror `dbflags::backfill`. If
+  `enrichment_meta.key = 'country_v1'` is absent, iterate `SELECT hex FROM
+  aircraft`, `UPDATE aircraft SET country = ?1 WHERE hex = ?2`, then write the
+  stamp. Idempotent; bump the key if the table changes.
+- Tests: known blocks (`a00000` US, `c00000` Canada, `400000` UK, `380000`
+  France, `3c0000` Germany, `7c0000` Australia, `780000` China, `840000`
+  Japan), inclusive bounds, unallocated `000000`, malformed input.
+
+**Schema:** append `("aircraft", "country", "TEXT")` to `NEW_COLUMNS`.
+
+**Poller:** compute `crate::country::code_for_hex(&hex)` and append it as the
+last placeholder in the `aircraft` INSERT. On conflict use
+`country = coalesce(excluded.country, aircraft.country)` so a temporarily
+incomplete table never erases a known code; the stamp-driven backfill handles
+corrections.
+
+**Stats:**
+
+- Append `a.country` to `COLS`, `country` to `AircraftRow`, and the field to
+  `row_to_aircraft` (append only — indices are positional). Add
+  `country_name() -> String` and `country_flag() -> String`.
+- `FleetFilter.country: String`; `to_sql` adds `a.country = :country`;
+  `active_labels` adds `country::name(&self.country)`.
+- `CountryCount { pub code: String, pub name: String, pub count: i64 }`
+  (serde) and `country_counts(db) -> Vec<CountryCount>`: `SELECT country,
+  COUNT(*) FROM aircraft WHERE country IS NOT NULL GROUP BY country
+  ORDER BY 2 DESC, 1`.
+- `Stats.countries: i64` (`COUNT(DISTINCT country)`) and
+  `Stats.top_country: Option<CountryCount>`; both are cheap enough for the
+  existing 10 s `stats_cached`.
+
+**Web:** `SortParams.country` (default empty, accept only 2 ASCII letters),
+`SortParams::filter()` copies it, and `fleet_query` appends
+`country=<code>` so the address bar/bookmark keeps it. `FleetView` and
+`IndexTemplate` gain `countries: Vec<CountryCount>`.
+
+**UI:**
+
+- `index.html`: a "Country" filter row with a `<select id="f-country"
+  name="country">` ("Any country" + top 30 by count), `hx-get="/partials/table"
+  hx-trigger="change" hx-target="#fleet" hx-include="#fleet-controls,
+  #fleet-sort, #fleet-dir"`. Always include the active country in the options
+  even when it falls outside the top 30, or the select silently resets on the
+  next render.
+- `partials/table.html`: a `Country` header after Registration;
+  `table_row.html`: flag + ISO code, `title` = full name.
+- `partials/cards.html`: a Ledger card "countries" with the count and the top
+  country's name.
+- `aircraft.html`: an Identity row before Registration:
+  `{{ row.country_flag() }} {{ row.country_name() }}`.
+- `app.css`: only if the flag/code cell or the select needs alignment.
+
+**Verify:** `cargo test` (country unit tests), `cargo check`, build, `up -d`.
+`curl -s localhost:8081/api/aircraft | jq '.[0].country'`; compare
+`SELECT country, COUNT(*) FROM aircraft GROUP BY 1 ORDER BY 2 DESC` with the
+select options; filter to `CA` and confirm every row is Canadian; open a
+Canadian profile and see the flag/name; restart and confirm the backfill does
+not run twice.
+
+**Commit:** `plane-stats: country of registration from ICAO address blocks`
+
+---
+
+## Step 10 — Receiver coverage polar plot
+
+**Goal:** a polar plot of the best range heard in each 10° bearing sector, so
+antenna nulls, terrain shadows, and gain/bias-tee changes are visible.
+
+**Files:** `src/main.rs` (table); `src/poller.rs` (rollup); `src/stats.rs`
+(query + chart geometry); `src/web.rs`; `templates/coverage.html`;
+`static/app.css`; `README.md`; `AGENTS.md`.
+
+**Backup first:** this is a schema step.
+
+**Schema:**
+
+```sql
+CREATE TABLE IF NOT EXISTS range_sector (
+  day TEXT NOT NULL,
+  sector INTEGER NOT NULL,        -- 0..35, 10° clockwise from north
+  max_range_nm REAL NOT NULL,
+  polls INTEGER NOT NULL DEFAULT 1,
+  PRIMARY KEY (day, sector)
+);
+```
+
+No extra index; the primary key covers the `day` prefix. `range_sector` grows
+36 rows/day (~13k/year) and is never pruned — the all-time plot needs it.
+
+**Poller:** in `record_poll`, read `crate::stats::rx_pos()` once; if `None`,
+skip the sector rollup (the rest of the poll still runs). For each live
+aircraft that is not on the ground, has `lat`/`lon`, and has a finite
+`r_dst > 0`:
+
+```rust
+let bearing = crate::stats::bearing_deg(rx.0, rx.1, lat, lon);
+let sector = (bearing / 10.0).floor() as i64 % 36;
+```
+
+Upsert into `range_sector` with the same `day` already computed for
+`day_aircraft`:
+
+```sql
+INSERT INTO range_sector (day, sector, max_range_nm, polls)
+VALUES (?1, ?2, ?3, 1)
+ON CONFLICT(day, sector) DO UPDATE SET
+  max_range_nm = MAX(range_sector.max_range_nm, excluded.max_range_nm),
+  polls = range_sector.polls + 1
+```
+
+Exclude ground contacts: airport clutter is not coverage. `polls` counts
+aircraft-poll samples for a future density overlay; the plot uses
+`max_range_nm` only.
+
+**Stats:**
+
+```rust
+pub struct PolarPoint {
+    pub bearing_deg: f64, pub range_nm: f64,
+    pub x: f64, pub y: f64, pub label: String,
+}
+pub struct PolarRing { pub range_nm: f64, pub r: f64 }
+pub struct PolarChart {
+    pub points: Vec<PolarPoint>, pub path: String, pub max_nm: f64,
+    pub recent_points: Vec<PolarPoint>, pub recent_path: String,
+    pub recent_days: u32,
+    pub rings: Vec<PolarRing>, pub width: f64, pub height: f64,
+    pub center: f64, pub radius: f64, pub first_day: Option<String>,
+}
+pub fn receiver_polar(db: &Db, now: f64) -> rusqlite::Result<PolarChart>;
+```
+
+- All-time: `SELECT sector, MAX(max_range_nm) FROM range_sector GROUP BY
+  sector ORDER BY sector`.
+- Recent: the same query with `WHERE day >= :cutoff` for the last 30 days
+  (`recent_days = 30`). The recent polygon is the current antenna view; the
+  all-time polygon is the envelope. A gain or cable change shows as the recent
+  line pulling away from the envelope.
+- If the all-time query returns no rows, return `points: Vec::new()`,
+  `rings: Vec::new()`, both paths empty, and let the template show the empty
+  state. Otherwise build all 36 slots for both series, missing sectors = 0.
+- `max_nm = max(1.0, (max / 50.0).ceil() * 50.0)`; rings at 25/50/75/100%.
+- Fixed geometry: `width = height = 360`, `center = 180`, `radius = 150`.
+  `x = center + radius * (range/max_nm) * sin(rad)`,
+  `y = center - radius * (range/max_nm) * cos(rad)` (0° = north, clockwise).
+  `path = "M center,center L x0,y0 ... Z"`; all-zero data → empty path.
+- `first_day = SELECT MIN(day) FROM range_sector`.
+- Tests: bearing→sector boundaries (0°, 9.99°, 10°, 359.9°), north/east points
+  land at the expected x/y, empty data → empty path and no NaN.
+
+**Web:** `CoverageTemplate` gains `polar`; `coverage_page` calls
+`receiver_polar(&db, now)`. Keep the polar panel **outside** the 10 s
+`#coverage` partial so it is not re-queried every tick. Add `GET /api/polar`
+(do not change the `/api/coverage` shape).
+
+**Template:** a "Receiver coverage" panel above the live coverage panel:
+
+```html
+<section class="glass panel" aria-label="Receiver coverage">
+  <h2>Receiver coverage</h2>
+  {% if polar.points.is_empty() %}
+  <p class="empty-note">No sector data yet. The plot fills in as positioned
+    aircraft are heard.</p>
+  {% else %}
+  <div class="polar">
+    <svg viewBox="0 0 360 360" role="img"
+         aria-label="Best range in each 10 degree bearing sector">
+      {% for ring in polar.rings %}
+      <circle class="polar-ring" cx="{{ polar.center }}" cy="{{ polar.center }}"
+              r="{{ ring.r }}"></circle>
+      {% endfor %}
+      <line class="polar-spoke" x1="{{ polar.center }}" y1="{{ polar.center }}"
+            x2="{{ polar.center }}" y2="30"></line>
+      <path class="polar-area" d="{{ polar.path }}"></path>
+      <path class="polar-recent" d="{{ polar.recent_path }}"></path>
+      {% for p in polar.points %}
+      <circle class="polar-dot" cx="{{ p.x }}" cy="{{ p.y }}" r="2">
+        <title>{{ p.label }} · {{ p.range_nm }} nm (all time)</title>
+      </circle>
+      {% endfor %}
+    </svg>
+    <p class="chart-note">All time (fill) vs last {{ polar.recent_days }} days
+      (line){% if let Some(d) = polar.first_day %} · since {{ d }}{% endif %}</p>
+  </div>
+  <details class="chart-table">
+    <summary>Show as table</summary>
+    <!-- 36 rows: bearing, max range -->
+  </details>
+  {% endif %}
+</section>
+```
+
+`app.css`: `.polar svg { width: 100%; max-width: 420px; height: auto; }`,
+`.polar-ring { fill: none; stroke: var(--border); }`,
+`.polar-spoke { stroke: var(--border); }`,
+`.polar-area { fill: rgba(158, 197, 232, 0.12); stroke: var(--border); }`,
+`.polar-recent { fill: none; stroke: var(--accent); }`,
+`.polar-dot { fill: var(--accent); }`.
+
+**Verify:** `curl -s localhost:8081/api/polar | jq '.max_nm, .points[0]'`;
+the all-time global max should equal `SELECT MAX(max_range_nm) FROM
+day_aircraft` within one poll (the same aircraft supplies both); each recent
+sector is `<=` its all-time value; manually compute a bearing for a
+high-range aircraft and confirm its sector; no RX position → empty state and
+no `range_sector` writes; ground contacts absent; no NaN in either path; no
+horizontal scroll on mobile.
+
+**Commit:** `plane-stats: receiver coverage polar plot`
+
+---
+
+## Step 11 — Activity charts: traffic and coverage trend
+
+**Goal:** `/activity` gains unique aircraft per day, new aircraft per day, and
+network coverage % per day. These are the missing time series next to best
+range and messages.
+
+**Files:** `src/stats.rs`; `src/web.rs`; `templates/activity.html`;
+`README.md`; `AGENTS.md`.
+
+**No schema.**
+
+### 11a — Unique and new per day
+
+- `unique_by_day(db, now) -> Vec<DayValue>`: last 90 days from
+  `day_aircraft`:
+
+```sql
+SELECT day, COUNT(*) FROM day_aircraft
+WHERE day >= ?1 GROUP BY day ORDER BY day
+```
+
+- `new_by_day(db, now) -> Vec<DayValue>`: last 90 days from
+  `aircraft.first_seen`, bucketed by local day:
+
+```sql
+SELECT strftime('%Y-%m-%d', first_seen, 'unixepoch', 'localtime') AS day,
+       COUNT(*)
+FROM aircraft WHERE first_seen >= ?1
+GROUP BY day ORDER BY day
+```
+
+`strftime(..., 'localtime')` uses the container `TZ` and applies the DST
+offset per timestamp. Do not copy `messages_by_day`'s fixed-offset trick here;
+that one stores a day index, not a timestamp.
+
+`unique_by_day` starts at deploy (the `day_aircraft` ledger), while
+`new_by_day` covers the full `aircraft` history. Note that difference in the
+chart caption rather than implying both start on the same day.
+
+### 11b — Network coverage per day
+
+```rust
+pub struct CoverageDay {
+    pub day: String,
+    pub network: i64,
+    pub local: i64,
+    pub overlap: i64,
+    pub cover_pct: Option<f64>, // None when the local poller was down
+}
+pub fn coverage_by_day(db: &Db, now: f64) -> rusqlite::Result<Vec<CoverageDay>>;
+```
+
+```sql
+WITH net AS (
+  SELECT day, COUNT(*) n FROM network_day_aircraft
+  WHERE day >= :cutoff GROUP BY day
+), loc AS (
+  SELECT day, COUNT(*) l FROM day_aircraft
+  WHERE day >= :cutoff AND max_alt_ft IS NOT NULL GROUP BY day
+), ov AS (
+  SELECT d.day, COUNT(*) o FROM day_aircraft d
+  JOIN network_day_aircraft n ON n.day = d.day AND n.hex = d.hex
+  WHERE d.day >= :cutoff AND d.max_alt_ft IS NOT NULL GROUP BY d.day
+), up AS (
+  SELECT strftime('%Y-%m-%d', ts, 'unixepoch', 'localtime') day,
+         COUNT(*) polls
+  FROM poll_log WHERE ts >= :cutoff_ts GROUP BY 1
+)
+SELECT net.day, net.n, coalesce(loc.l, 0), coalesce(ov.o, 0),
+       coalesce(up.polls, 0)
+FROM net
+LEFT JOIN loc ON loc.day = net.day
+LEFT JOIN ov  ON ov.day  = net.day
+LEFT JOIN up  ON up.day  = net.day
+ORDER BY net.day
+```
+
+`cover_pct = Some(overlap * 100.0 / network)` only when `polls > 0 &&
+network > 0`; otherwise `None`. A day with the poller down must be a gap, not
+0%. `poll_log` is pruned at 90 days, which matches the chart window. Ground
+contacts are already excluded on both sides (`max_alt_ft IS NOT NULL` and the
+network write path).
+
+### 11c — Chart and template
+
+- `Activity` gains `unique: Vec<DayValue>`, `new: Vec<DayValue>`, and
+  `coverage: Vec<CoverageDay>`; `/api/activity` returns them automatically.
+- `LineChart::build_bounded(series, min, max)` for the 0–100% coverage axis;
+  refactor `build` to delegate with `None` bounds. A 60–80% series must sit in
+  the upper half of the plot, with labels 100/50/0. Unit-test that.
+- `ActivityTemplate` gains `unique`, `new`, `coverage_chart` (built from the
+  `Some` days) and `coverage` (raw rows for the table).
+- Add three panels after "Best range by day": "Unique aircraft by day",
+  "New aircraft by day", "Network coverage by day". Reuse the existing chart
+  markup and `<details>` table. The coverage table shows day, local, network,
+  overlap, cover %. Caption: "Days with no local polls are omitted."
+
+**Verify:** `curl -s localhost:8081/api/activity | jq '.coverage[0]'`; per day
+`overlap <= min(local, network)` and `cover_pct` matches; a day with the
+poller stopped is absent/`None`, not 0%; `unique` per day equals
+`COUNT(*) FROM day_aircraft`; `new` sums to the `aircraft` count in the window;
+a one-point series renders flat; no mobile horizontal scroll.
+
+**Commit:** `plane-stats: traffic and coverage trends on activity`
+
+---
+
+## Step 12 — Records and rarities page
+
+**Goal:** `/records` collects the fun extremes the ledger already has but only
+shows one at a time: one-hit wonders, longest overhead pass, steepest
+climb/descent, oldest airframes, rarest types, most-heard callsigns.
+
+**Files:** `src/stats.rs`; `src/web.rs`; new `templates/records.html`; nav
+pills in `index.html`, `today.html`, `activity.html`, `types.html`,
+`coverage.html`; `static/app.css`; `README.md`; `AGENTS.md`.
+
+**No schema.**
+
+**Stats structs:**
+
+```rust
+pub struct RarityRow {
+    pub hex: String, pub registration: Option<String>,
+    pub typecode: Option<String>, pub callsign: Option<String>,
+    pub first_seen: f64, pub last_seen: f64, pub sightings: i64,
+}
+pub struct VisitRecord {
+    pub hex: String, pub registration: Option<String>,
+    pub typecode: Option<String>, pub start_ts: f64, pub end_ts: f64,
+    pub duration_secs: f64, pub polls: i64,
+}
+pub struct YearRecord {
+    pub hex: String, pub registration: Option<String>,
+    pub typecode: Option<String>, pub year: i64,
+}
+pub struct CallsignRecord {
+    pub callsign: String, pub airframes: i64, pub sightings: i64,
+}
+pub struct RarestType {
+    pub designator: String, pub name: String,
+    pub caught: i64, pub registered: i64, pub pct: Option<f64>,
+}
+pub struct Records {
+    pub one_hit_count: i64,
+    pub one_hits: Vec<RarityRow>,
+    pub longest_visits: Vec<VisitRecord>,
+    pub steepest_climbs: Vec<Record>,
+    pub steepest_descents: Vec<Record>,
+    pub oldest: Vec<YearRecord>,
+    pub rarest_types: Vec<RarestType>,
+    pub top_callsigns: Vec<CallsignRecord>,
+}
+pub fn records(db: &Db) -> rusqlite::Result<Records>;
+```
+
+**Queries:**
+
+- One-hit wonders: `WHERE a.sightings = 1 ORDER BY a.last_seen DESC LIMIT 20`
+  plus `COUNT(*)`. Join `enrichment`/`network_enrichment` for registration and
+  type.
+- Longest visits: `SELECT v.hex, v.start_ts, v.end_ts,
+  v.end_ts - v.start_ts AS dur, v.polls, coalesce(...) FROM visits v
+  LEFT JOIN ... ORDER BY dur DESC LIMIT 10`. A visit is a continuous pass
+  (10-minute gap threshold), so duration is bounded by actual presence. Show
+  `polls` next to it.
+- Climb/descent: refactor `record()` into `records_by(conn, col, limit)` and
+  call it with `max_baro_rate DESC` and `min_baro_rate ASC`. Keep the existing
+  single-record callers working.
+- Oldest airframes: `coalesce(nullif(e.built,''), n.year)` → first four
+  characters → integer. Keep only 4-digit years in `1900..=current`, order
+  ascending, limit 10. `built` may be `YYYY-MM-DD` or `YYYY`; `substr(...,1,4)`
+  handles both. `YearRecord::year_str()` must return a plain year, not
+  `fmt_num`'s `2,001`.
+- Rarest types: reuse `type_dex()`, filter `caught > 0`, sort by
+  `rarity_rank()` ascending, take 10; use `display_name()` and link to
+  `/type/:code`.
+- Top callsigns: `SELECT callsign, COUNT(DISTINCT hex), SUM(sightings) FROM
+  aircraft_callsigns GROUP BY callsign ORDER BY 2 DESC, 3 DESC LIMIT 10`.
+- Accessors: `VisitRecord::duration_str()` reuses the `fmt_duration` logic
+  (move it from `web.rs` into `stats.rs` or duplicate it);
+  `YearRecord::year_str()` returns the plain integer.
+
+**Web:** `GET /records` and `GET /api/records`; `RecordsTemplate { records,
+tar1090 }`. Add a "Records" pill to every existing nav and the new page.
+
+**Template:** sections with the existing `.cards` / `.table-wrap` classes:
+"Rare catches" (one-hit count card + table), "Longest overhead", "Climb and
+descent" (two small tables), "Oldest airframes", "Rarest types", "Most-heard
+callsigns". Link hexes to `/aircraft/:hex` and designators to `/type/:code`;
+every section gets an empty state.
+
+**Verify:** one-hit count + multi-hit count = total aircraft; longest visit
+duration equals `end_ts - start_ts`; climb/descent signs match the profile
+rows; `2001`, `2001-01-01`, and blank years parse correctly; rarest types
+exclude zero-caught and links resolve; `/api/records` is valid JSON; an empty
+database renders empty states.
+
+**Commit:** `plane-stats: records and rarities page`
+
+---
+
+## Step 13 — Aircraft schedule and streaks
+
+**Goal:** the aircraft profile answers "when does this one usually pass?" and
+"how many days have I heard it?".
+
+**Files:** `src/stats.rs`; `src/web.rs`; `templates/aircraft.html`;
+`static/app.css`; `README.md`; `AGENTS.md`.
+
+**No schema.**
+
+**Stats:**
+
+```rust
+pub struct Schedule {
+    pub hours: Vec<HourBucket>,      // 24, visit starts by local hour
+    pub max_count: i64,              // for bar heights
+    pub days_heard: i64,
+    pub current_streak: i64,
+    pub longest_streak: i64,
+    pub typical_hour: Option<u32>,
+    pub first_day: Option<String>,
+    pub last_day: Option<String>,
+}
+pub fn schedule_for(db: &Db, hex: &str) -> rusqlite::Result<Schedule>;
+```
+
+- Visits: `SELECT start_ts FROM visits WHERE hex = ?1` (all rows; do not reuse
+  the 200-row `visits_for` cap). Bucket with `chrono::Local` hour.
+- Days: `SELECT DISTINCT day FROM day_aircraft WHERE hex = ?1 ORDER BY day`;
+  parse `NaiveDate`.
+- Pure helper `streaks(days: &[NaiveDate], today: NaiveDate) -> (current,
+  longest)`: longest = max run of consecutive days (`succ_opt`); current = run
+  ending at `today`, or at `today - 1` if not heard today yet (grace so the
+  streak does not reset at midnight); else 0.
+- `typical_hour` = argmax of `hours`, ties → earliest.
+- Tests: empty, one day, consecutive run, gap, current ending yesterday,
+  duplicate days.
+- Note: `visits` and `day_aircraft` both start at deploy; there is no older
+  history.
+
+**Web:** `AircraftTemplate` gains `schedule`; `aircraft_profile` calls
+`schedule_for`; `/api/aircraft/:hex` gains `schedule`.
+
+**Template:** a "Schedule" panel before Visits:
+
+- 24 CSS bars, one per local hour, height from
+  `h.pct(schedule.max_count)`; labels every 3 hours; `title` = hour + visit
+  count.
+- Rows: days heard, current streak, longest streak, usual hour, first/last
+  day.
+- `<details>` table of all 24 hours for accessibility.
+
+`app.css`:
+
+```css
+.sched-bars { display: grid; grid-template-columns: repeat(24, minmax(0, 1fr));
+              align-items: end; height: 80px; gap: 2px; }
+.sched-bar { height: var(--h); background: var(--accent); border-radius: 2px; }
+```
+
+**Verify:** `sum(hours) == SELECT COUNT(*) FROM visits WHERE hex = ?`;
+`days_heard` equals the distinct-day count; streak unit tests; a profile with
+no visits shows an empty state; `/api/aircraft/<hex>` includes `schedule`;
+bars do not overflow on mobile.
+
+**Commit:** `plane-stats: aircraft schedule and streaks`
+
+---
+
+## Step 14 — Flight routes (adsbdb)
+
+**Goal:** the aircraft profile shows `origin → destination` for the callsign,
+with the airline when known.
+
+**Terms gate:** adsbdb's README states that the flight-route data "may not be
+copied, published, or incorporated into other databases without the explicit
+permission of David J Taylor". Therefore this step **must not** add a SQLite
+table, a bulk crawl, or an export. Keep a bounded in-memory cache only, for
+display on the profile. If persistence or a route page is wanted later, ask
+permission first.
+
+**Files:** new `src/routes.rs`; `src/main.rs` (mod + spawn); `src/web.rs`
+(profile field, optional partial); `templates/aircraft.html`; new
+`templates/partials/route.html` (optional); `docker-compose.yml`;
+`README.md`; `AGENTS.md`.
+
+**Config:**
+
+| Variable | Default | Meaning |
+|---|---|---|
+| `ROUTE_LOOKUP` | `on` | `off` disables all requests |
+| `ROUTE_API` | `https://api.adsbdb.com/v0` | API base |
+| `ROUTE_TTL_SECS` | `604800` | positive cache TTL (7 days) |
+| `ROUTE_NEG_TTL_SECS` | `2592000` | negative cache TTL (30 days) |
+| `ROUTE_POLL_SECS` | `60` | resolver cycle |
+
+**Data:**
+
+```rust
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct Route {
+    pub callsign: String,
+    pub airline: Option<String>,
+    pub origin_iata: String, pub origin_icao: String, pub origin_name: String,
+    pub dest_iata: String, pub dest_icao: String, pub dest_name: String,
+    pub fetched_at: f64,
+}
+struct CachedRoute { route: Option<Route>, fetched_at: f64 }
+static CACHE: LazyLock<RwLock<HashMap<String, CachedRoute>>>;
+```
+
+**Resolver (`routes::run(db)`):**
+
+1. If `ROUTE_LOOKUP=off`, log once and return.
+2. Every `ROUTE_POLL_SECS`, collect candidates:
+   `SELECT DISTINCT last_flight FROM aircraft WHERE last_seen > now - 3600
+   AND last_flight IS NOT NULL`, plus
+   `SELECT callsign FROM aircraft_callsigns WHERE last_seen > now - 7*86400
+   GROUP BY callsign ORDER BY MAX(last_seen) DESC LIMIT 200`.
+3. Normalize: trim, uppercase, keep only 2–8 `[A-Z0-9]`; dedup. Skip entries
+   whose positive or negative cache entry is still fresh.
+4. `GET {ROUTE_API}/callsign/{callsign}` with a 10 s timeout and
+   `User-Agent: plane-stats/0.1 (personal ADS-B dashboard)`.
+   - 200 → parse `response.flightroute`; `airline.name` is optional;
+     `origin`/`destination` must have `iata_code`, `icao_code`, `name`.
+   - 404 → negative cache (`route: None`).
+   - 429 → sleep 60 s and stop this cycle.
+   - Other errors → log and retry next cycle; do not cache.
+5. Sleep 1 s between requests. Prune expired entries and cap the cache at
+   5,000 (drop the oldest `fetched_at`).
+
+**Read path:** `pub fn for_hex(db: &Db, hex: &str) -> Option<Route>` reads the
+aircraft's `last_flight` (fallback: most recent `aircraft_callsigns` row),
+normalizes, and looks up the cache. No network on the request path.
+
+**Web:** `AircraftTemplate` gains `route: Option<routes::Route>`;
+`aircraft_profile` calls `routes::for_hex`; `/api/aircraft/:hex` gains
+`route`. In `aircraft.html`, add an Identity row after Operator callsign:
+
+```html
+{% if let Some(r) = route %}
+<tr><th>Route</th><td>{{ r.origin_iata }} → {{ r.dest_iata }} ·
+  {{ r.origin_name }} → {{ r.dest_name }}{% if let Some(a) = r.airline %} ·
+  {{ a }}{% endif %}</td></tr>
+{% endif %}
+```
+
+Show "Route data: adsbdb.com" with a link whenever a route is rendered.
+Optional: `/partials/route/:hex` with `hx-get`/`hx-trigger="load"` so a
+profile opened before the first resolver cycle fills in without a manual
+refresh; the partial returns the row or an empty string.
+
+**Verify:** with `ROUTE_LOOKUP=on`, wait one cycle, open a profile for a known
+airline callsign (e.g. `ACA123`) and see `YYZ → YVR`; `curl
+/api/aircraft/<hex> | jq '.route'`; logs show one request per callsign and no
+repeat within the TTL; an unknown callsign is negative-cached; `ROUTE_LOOKUP=off`
+makes no requests; the API being down leaves pages rendering; `SELECT name
+FROM sqlite_master WHERE name LIKE '%route%'` returns nothing.
+
+**Commit:** `plane-stats: flight routes from adsbdb (memory cache)`
+
+---
+
+## Rollout order for steps 9–14
+
+1. **Step 9** country (schema + poller; backup first).
+2. **Step 10** polar plot (schema + poller; backup first).
+3. **Step 11** activity charts (read-only).
+4. **Step 12** records page (read-only).
+5. **Step 13** schedule/streaks (read-only).
+6. **Step 14** routes (external dependency + terms gate).
+
+Each step is its own change set: `cargo test` on the host, `cargo check`,
+build, `up -d`, exercise the surface, update `README.md`/`AGENTS.md`, then
+commit. Do not bundle steps.
+
+Docs to touch per step:
+
+- **9:** README data model (`aircraft.country`) and fleet filter; AGENTS
+  country bullet (source table, `country_v1` stamp).
+- **10:** README `/api/polar` and `range_sector`; AGENTS polar bullet
+  (10° sectors, ground excluded, all-time + 30-day overlay).
+- **11:** README `/api/activity` fields; AGENTS activity bullet (coverage
+  gaps are `null`, not 0%).
+- **12:** README `/records` and `/api/records`; AGENTS records bullet.
+- **13:** README profile schedule; AGENTS schedule/streak bullet.
+- **14:** README config rows (`ROUTE_*`) and the adsbdb terms note; AGENTS
+  routes bullet (memory-only, no SQLite table, 1 req/s).
+
 ## Cross-cutting notes
 
 - **Positional columns:** `aircraft_sorted` reads `COLS` via `row_to_aircraft`.
@@ -699,3 +1347,9 @@ day table.
 | 8c. Network enrichment fallback | done | `plane-stats: network enrichment fallback` |
 | 8d. Feeder status card | done | `plane-stats: feeder status card` |
 | 8e. Daily digest network coverage | done | `plane-stats: daily digest network coverage` |
+| 9. Country of registration | done | — |
+| 10. Receiver coverage polar plot | done | — |
+| 11. Activity traffic + coverage trends | done | — |
+| 12. Records and rarities page | done | — |
+| 13. Aircraft schedule and streaks | done | — |
+| 14. Flight routes (adsbdb, memory cache) | done | — |

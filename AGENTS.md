@@ -26,6 +26,11 @@ Regression symptom: no aircraft on the map, and no
 - `READSB_ENABLE_BIASTEE=on` — bias tee powered (antenna LNA). **Do not disable
   without asking the user.**
 - `READSB_GAIN=autogain`.
+- `tar1090` sets `READSB_ENABLE_TRACES=true`: readsb writes one gzipped
+  per-airframe trace per day under `/var/globe_history/YYYY/MM/DD/traces/`.
+  `MAX_GLOBE_HISTORY=14` bounds retention; the nightly tar1090 backup archive
+  carries them to the NAS. Trace files are the only durable per-position
+  history (plane-stats stores just `aircraft.last_lat`/`last_lon`).
 
 ## Verification
 
@@ -125,6 +130,18 @@ docker compose --profile adsb build plane-stats
   no-cache`; the templates link `/app.css?v=2` to invalidate copies cached
   under the old one-day header. Bump the query only if a long-cached URL must
   be broken again.
+- **Header nav** lives in `templates/partials/nav.html` (links in
+  `nav_links.html`): a pill row above 860px, a native `<details>` sheet below,
+  with both copies present and the inactive one hidden by `display` so the
+  menu works without JS. Each page template carries an `active: &'static str`
+  field (`"dashboard"`, `"today"`, …) selecting the `aria-current="page"`
+  link; page-specific actions go under the tagline in `.page-actions`, never
+  into the section nav.
+- **Favicon:** `static/favicon.svg` is the aircraft mark on a night-ground
+  tile and is the source; `static/favicon-32.png` is rasterized from it
+  (`ffmpeg -i favicon.svg -vf scale=32:32 favicon-32.png`). `web.rs` serves
+  both and answers `/favicon.ico` with the PNG so a browser probing the
+  default path never gets the HTML error page.
 - **tar1090 `dbFlags`:** bit 0 = military, 1 = interesting, 2 = PIA, 3 = LADD.
 - `aircraft.json` per-aircraft fields worth knowing: `r_dst` (range nm), `seen`
   (message age s), `seen_pos`, `dbFlags`, `category`. The poller keeps only
@@ -299,6 +316,35 @@ Refresh model (do not "simplify" back to a whole-table tick):
 - The three `aircraft ⋈ enrichment` aggregates use `CROSS JOIN` on purpose:
   with a plain `JOIN` SQLite scans all ~520k enrichment rows (`SCAN e`) instead
   of the ~350 aircraft rows (605 ms → 10 ms).
+
+Country, polar coverage, records, schedule and routes (steps 9-14):
+
+- `aircraft.country` is set from the ICAO 24-bit address blocks in
+  `plane-stats/src/country.rs` (ICAO Annex 10 Table 9-1, generated once and
+  committed). The poller writes it, `country_v1` in `enrichment_meta` guards the
+  one-shot backfill, and the fleet table has a country select + column.
+- `/countries` ranks every state of registry by airframes, with its share of
+  the known ledger, distinct types, best range and last heard. Each row links
+  to `/?country=XX`, the fleet filter. `/api/countries` takes the same
+  `sort=count|name|recent|range` as the page and returns the rows.
+- `range_sector` holds the best range per local day per 10° bearing sector
+  (36 rows/day, never pruned). The poller writes it only when `RX_LAT`/`RX_LON`
+  are set, excluding ground contacts; `/coverage` renders all-time vs last-30-day
+  polygons and `/api/polar` returns the geometry. `rangebackfill::run` seeds it
+  once from tar1090's gzipped heatmap (`GLOBE_HISTORY`, mounted read-only at
+  `/globe_history`): 16-byte records of hex, lat/lon ×1e6, alt/gs; callsign
+  metadata blocks and ground (`alt=-123`) are skipped. Stamp
+  `range_sector_backfill_v1` in `enrichment_meta`; it never writes to tar1090.
+- `/activity` adds unique-by-day (`day_aircraft`), new-by-day (`aircraft` full
+  history) and network coverage % per day. Coverage is `null` when that day had
+  no local polls, never 0%; the chart uses `LineChart::build_bounded(0, 100)`.
+- `/records` and `/api/records` reuse `type_dex`, `records_by`, `visits`, and
+  the enrichment year; no new tables.
+- The aircraft profile has a 24-hour visit-start schedule, day streak (grace for
+  a streak ending yesterday), and an adsbdb `origin → destination` row.
+- `src/routes.rs` is memory-only by design: adsbdb's terms forbid persisting or
+  exporting route data. Never add a routes table or crawl; `ROUTE_LOOKUP=off`
+  disables requests.
 
 Detailed step-by-step plan for the remaining work: `plane-stats/PLAN.md`.
 

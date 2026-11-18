@@ -4,6 +4,7 @@
     <tr>
       <th scope="col">Callsign</th>
       <th scope="col">Type</th>
+      <th scope="col">Country</th>
       <th scope="col">Alt (ft)</th>
       <th scope="col">Speed (kt)</th>
       <th scope="col">Climb (fpm)</th>
@@ -15,7 +16,7 @@
   </thead>
   <tbody>
     {% if live.is_empty() %}
-    <tr><td colspan="9" class="empty-row">
+    <tr><td colspan="10" class="empty-row">
       {% if let Some(s) = poller.sentence() %}<span class="warn">{{ s }}</span>
       {% else %}Nothing overhead right now — the receiver is polling and hearing nothing.{% endif %}
     </td></tr>
@@ -24,6 +25,7 @@
     <tr>
       <td><a href="/aircraft/{{ a.hex }}">{% if let Some(cs) = a.last_flight %}{{ cs }}{% else %}{{ a.hex }}{% endif %}</a></td>
       <td class="mono">{% if let Some(u) = a.type_url() %}<a href="{{ u }}" title="Open the {{ a.type_code() }} type page">{{ a.type_code() }}</a>{% else %}{{ a.type_code() }}{% endif %}</td>
+      <td title="{{ a.country_name() }}">{% if a.country.is_some() %}{{ a.country_flag() }} <span class="mono">{{ a.country_code() }}</span>{% else %}-{% endif %}</td>
       <td>{{ a.alt_str() }}</td>
       <td>{{ a.gs_str() }}</td>
       <td>{{ a.climb_str() }}</td>

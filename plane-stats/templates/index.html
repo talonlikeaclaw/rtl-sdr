@@ -5,8 +5,11 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="theme-color" content="#060a15">
   <title>plane-stats</title>
+  <link rel="icon" href="/favicon.svg?v=1" type="image/svg+xml">
+  <link rel="icon" href="/favicon-32.png?v=1" sizes="32x32" type="image/png">
   <link rel="stylesheet" href="/app.css?v=2">
   <script src="/htmx.min.js"></script>
+  <script src="/app.js" defer></script>
 </head>
 <body>
   <a class="skip" href="#main">Skip to content</a>
@@ -30,18 +33,15 @@
           <p class="tagline">Every aircraft heard on 1090&nbsp;MHz — first seen, last seen, records.<span class="meta">ADS-B</span></p>
         </div>
       </div>
-      <nav class="hero-actions" aria-label="Primary">
-        <a class="pill" href="/today">Today</a>
-        <a class="pill" href="/activity">Activity</a>
-        <a class="pill" href="/types">Types</a>
-        <a class="pill" href="/coverage">Coverage</a>
-        <a class="pill" href="{{ tar1090 }}/" target="_blank" rel="noopener">Open live map</a>
+      <div class="hero-tools">
+        {% include "partials/nav.html" %}
         <span class="pill status {{ poller.state() }}" title="Age of the most recent poll">
           <span class="dot" aria-hidden="true"></span>
           {% if poller.is_live() %}<span class="wave" aria-hidden="true"><span></span><span></span><span></span><span></span></span>{% endif %}
-          {{ poller.label() }}
+          <span class="status-full">{{ poller.label() }}</span>
+          <span class="status-short">{{ poller.short_label() }}</span>
         </span>
-      </nav>
+      </div>
     </header>
 
     {% if let Some(alert) = poller.alert() %}
@@ -160,6 +160,21 @@
                      hx-get="/partials/table" hx-trigger="change" hx-target="#fleet"
                      hx-include="#fleet-controls, #fleet-sort, #fleet-dir">
               <label class="chip" for="f-cat-heli">Helicopter<span class="chip-n">{{ counts.heli }}</span></label>
+            </div>
+          </div>
+
+          <div class="filter-row" role="group" aria-label="Country filters">
+            <span class="filter-label">Country</span>
+            <div class="chips">
+              <select id="f-country" name="country" class="country-select"
+                      hx-get="/partials/table" hx-trigger="change" hx-target="#fleet"
+                      hx-include="#fleet-controls, #fleet-sort, #fleet-dir"
+                      aria-label="State of registry">
+                <option value="">Any country</option>
+                {% for c in countries %}
+                <option value="{{ c.code }}"{% if c.code == filter.country %} selected{% endif %}>{{ c.flag() }} {{ c.name }} ({{ c.count }})</option>
+                {% endfor %}
+              </select>
             </div>
           </div>
 

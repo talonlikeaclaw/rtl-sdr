@@ -5,8 +5,11 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="theme-color" content="#060a15">
   <title>Coverage · plane-stats</title>
+  <link rel="icon" href="/favicon.svg?v=1" type="image/svg+xml">
+  <link rel="icon" href="/favicon-32.png?v=1" sizes="32x32" type="image/png">
   <link rel="stylesheet" href="/app.css?v=2">
   <script src="/htmx.min.js"></script>
+  <script src="/app.js" defer></script>
 </head>
 <body>
   <a class="skip" href="#main">Skip to content</a>
@@ -30,16 +33,59 @@
           <p class="tagline">Local receiver vs adsb.fi within {{ coverage.radius_nm }} NM.<span class="meta">ADS-B</span></p>
         </div>
       </div>
-      <nav class="hero-actions" aria-label="Primary">
-        <a class="pill" href="/">← Dashboard</a>
-        <a class="pill" href="/today">Today</a>
-        <a class="pill" href="/activity">Activity</a>
-        <a class="pill" href="/types">Types</a>
-        <a class="pill" href="{{ tar1090 }}/" target="_blank" rel="noopener">Open live map</a>
-      </nav>
+      <div class="hero-tools">
+        {% include "partials/nav.html" %}
+      </div>
     </header>
 
     <main id="main">
+      <section class="glass panel" aria-label="Receiver coverage">
+        <h2>Receiver coverage</h2>
+        {% if polar.points.is_empty() %}
+        <p class="empty-note">No sector data yet. The plot fills in as positioned aircraft are heard.</p>
+        {% else %}
+        <div class="polar">
+          <svg viewBox="0 0 {{ polar.width }} {{ polar.height }}" role="img"
+               aria-label="Best range in each 10 degree bearing sector">
+            {% for ring in polar.rings %}
+            <circle class="polar-ring" cx="{{ polar.center }}" cy="{{ polar.center }}" r="{{ ring.r }}"></circle>
+            {% endfor %}
+            <line class="polar-spoke" x1="{{ polar.center }}" y1="{{ polar.center }}"
+                  x2="{{ polar.center }}" y2="30"></line>
+            <line class="polar-spoke" x1="{{ polar.center }}" y1="{{ polar.center }}"
+                  x2="{{ polar.edge() }}" y2="{{ polar.center }}"></line>
+            <line class="polar-spoke" x1="{{ polar.center }}" y1="{{ polar.center }}"
+                  x2="{{ polar.center }}" y2="{{ polar.edge() }}"></line>
+            <line class="polar-spoke" x1="{{ polar.center }}" y1="{{ polar.center }}"
+                  x2="30" y2="{{ polar.center }}"></line>
+            <path class="polar-area" d="{{ polar.path }}"></path>
+            <path class="polar-recent" d="{{ polar.recent_path }}"></path>
+            {% for p in polar.points %}
+            <circle class="polar-dot" cx="{{ p.x }}" cy="{{ p.y }}" r="2">
+              <title>{{ p.label }} · {{ p.range_nm }} nm (all time)</title>
+            </circle>
+            {% endfor %}
+          </svg>
+          <p class="chart-note">All time (fill) vs last {{ polar.recent_days }} days
+            (line){% if let Some(d) = polar.first_day %} · since {{ d }}{% endif %} · rings every {{ polar.ring_step() }} nm</p>
+        </div>
+        <details class="chart-table">
+          <summary>Show as table</summary>
+          <div class="table-wrap">
+            <table>
+              <caption class="sr-only">Best range per 10 degree bearing sector</caption>
+              <thead><tr><th scope="col">Bearing</th><th scope="col">Best range</th></tr></thead>
+              <tbody>
+                {% for p in polar.points %}
+                <tr><td>{{ p.label }}</td><td>{{ p.range_nm }} nm</td></tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
+        </details>
+        {% endif %}
+      </section>
+
       <section class="glass panel" aria-label="Coverage">
         <h2>Coverage</h2>
         <div id="coverage" hx-get="/partials/coverage"

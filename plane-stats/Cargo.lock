@@ -888,6 +888,7 @@ dependencies = [
  "axum",
  "chrono",
  "csv",
+ "flate2",
  "reqwest",
  "rusqlite",
  "serde",

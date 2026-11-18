@@ -115,9 +115,10 @@ fn record_poll(db: &Db, now: f64, live: &[&Aircraft], messages: i64) -> rusqlite
                 last_lat, last_lon, last_track,
                 max_baro_rate, min_baro_rate,
                 last_nav_alt_ft, last_nav_heading, last_emergency,
-                last_alt_ft, last_gs_kts, last_range_nm, last_baro_rate, last_msg_age, db_flags)
+                last_alt_ft, last_gs_kts, last_range_nm, last_baro_rate, last_msg_age, db_flags,
+                country)
              VALUES (?1, ?2, ?2, 1, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?13, ?14, ?15, ?16,
-                     ?17, ?7, ?8, ?13, ?18, ?19)
+                     ?17, ?7, ?8, ?13, ?18, ?19, ?20)
              ON CONFLICT(hex) DO UPDATE SET
                last_seen = excluded.last_seen,
                sightings = aircraft.sightings + 1,
@@ -136,6 +137,7 @@ fn record_poll(db: &Db, now: f64, live: &[&Aircraft], messages: i64) -> rusqlite
                last_baro_rate = excluded.last_baro_rate,
                last_msg_age = excluded.last_msg_age,
                db_flags = coalesce(excluded.db_flags, aircraft.db_flags),
+               country = coalesce(excluded.country, aircraft.country),
                max_alt_ft = nullif(MAX(ifnull(aircraft.max_alt_ft, -2147483648),
                                        ifnull(excluded.max_alt_ft, -2147483648)), -2147483648),
                max_gs_kts = nullif(MAX(ifnull(aircraft.max_gs_kts, -1e30),
@@ -191,6 +193,16 @@ fn record_poll(db: &Db, now: f64, live: &[&Aircraft], messages: i64) -> rusqlite
                max_range_nm = nullif(MAX(ifnull(day_aircraft.max_range_nm, -1e30),
                                          ifnull(excluded.max_range_nm, -1e30)), -1e30)",
         )?;
+        // Best range per 10° bearing sector, for the receiver polar plot.
+        // Ground contacts are excluded: airport clutter is not coverage.
+        let mut range_sector = tx.prepare(
+            "INSERT INTO range_sector (day, sector, max_range_nm, polls)
+             VALUES (?1, ?2, ?3, 1)
+             ON CONFLICT(day, sector) DO UPDATE SET
+               max_range_nm = MAX(range_sector.max_range_nm, excluded.max_range_nm),
+               polls = range_sector.polls + 1",
+        )?;
+        let rx = crate::stats::rx_pos();
 
         for a in live {
             let hex = a.hex.to_lowercase();
@@ -235,9 +247,20 @@ fn record_poll(db: &Db, now: f64, live: &[&Aircraft], messages: i64) -> rusqlite
                 last_alt_ft,
                 a.seen,
                 db_flags,
+                crate::country::code_for_hex(&hex),
             ])?;
 
             day_aircraft.execute(params![day.as_str(), hex.as_str(), now, alt_ft, a.gs, a.r_dst])?;
+
+            if let (Some((rx_lat, rx_lon)), Some(lat), Some(lon), Some(dst)) =
+                (rx, a.lat, a.lon, a.r_dst)
+            {
+                if !matches!(&a.alt_baro, Some(Alt::Ground(_))) && dst.is_finite() && dst > 0.0 {
+                    let bearing = crate::stats::bearing_deg(rx_lat, rx_lon, lat, lon);
+                    let sector = crate::stats::sector_for_bearing(bearing);
+                    range_sector.execute(params![day.as_str(), sector, dst])?;
+                }
+            }
 
             let emergency_str = a.emergency.as_deref().filter(|e| *e != "none");
             let emergency_squawk =

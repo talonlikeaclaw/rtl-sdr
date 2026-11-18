@@ -1,0 +1,8 @@
+<a class="pill" href="/"{% if active == "dashboard" %} aria-current="page"{% endif %}>Dashboard</a>
+<a class="pill" href="/today"{% if active == "today" %} aria-current="page"{% endif %}>Today</a>
+<a class="pill" href="/activity"{% if active == "activity" %} aria-current="page"{% endif %}>Activity</a>
+<a class="pill" href="/types"{% if active == "types" %} aria-current="page"{% endif %}>Types</a>
+<a class="pill" href="/records"{% if active == "records" %} aria-current="page"{% endif %}>Records</a>
+<a class="pill" href="/countries"{% if active == "countries" %} aria-current="page"{% endif %}>Countries</a>
+<a class="pill" href="/coverage"{% if active == "coverage" %} aria-current="page"{% endif %}>Coverage</a>
+{% if !tar1090.is_empty() %}<a class="pill" href="{{ tar1090 }}/" target="_blank" rel="noopener">Open live map</a>{% endif %}

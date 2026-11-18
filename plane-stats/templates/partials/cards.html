@@ -33,6 +33,11 @@
       <div class="who">{% if let Some(r) = stats.top_type %}top {% if let Some(u) = r.type_url() %}<a href="{{ u }}">{{ r.hex }}</a>{% else %}{{ r.hex }}{% endif %} · {{ r.value_str() }} aircraft · {% endif %}<a href="/types">dex →</a></div>
     </div>
     <div class="card">
+      <div class="num">{{ stats.countries }}</div>
+      <div class="sub">countries</div>
+      <div class="who">{% if let Some(c) = stats.top_country %}{{ c.flag() }} {{ c.name }} · {{ c.count }} aircraft · <a href="/countries">all {{ stats.countries }} →</a>{% else %}<a href="/countries">open countries →</a>{% endif %}</div>
+    </div>
+    <div class="card">
       <div class="num">{% if let Some(r) = stats.top_airframe %}{{ r.value_str() }} <span class="unit">polls</span>{% else %}-{% endif %}</div>
       <div class="sub">most heard</div>
       <div class="who">{% if let Some(r) = stats.top_airframe %}<a href="/aircraft/{{ r.hex }}">{{ r.ident() }}</a>{% else %}no regulars yet{% endif %}</div>

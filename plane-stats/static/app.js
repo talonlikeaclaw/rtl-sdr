@@ -106,3 +106,25 @@
   window.addEventListener("scroll", hide, { passive: true });
   window.addEventListener("resize", hide);
 })();
+
+/* The phone section menu is a native <details>, so it opens and closes
+   without this file. Add the two dismissals a menu is expected to have:
+   Escape returns focus to the button, and a tap outside closes it. */
+(() => {
+  const menu = document.querySelector(".nav-disclosure");
+  if (!menu) return;
+  const toggle = menu.querySelector("summary");
+  document.addEventListener("keydown", (e) => {
+    if (e.key !== "Escape" || !menu.open) return;
+    menu.open = false;
+    toggle.focus();
+  });
+  document.addEventListener("pointerdown", (e) => {
+    if (menu.open && !menu.contains(e.target)) menu.open = false;
+  });
+  // A link that opens a new tab leaves the page in place; close the sheet so
+  // it is not still covering the current page on return.
+  menu.addEventListener("click", (e) => {
+    if (e.target.closest("a")) menu.open = false;
+  });
+})();

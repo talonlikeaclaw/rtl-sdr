@@ -274,8 +274,12 @@ One column, 1160px max, centred. Body padding is
 `clamp(1.25rem, 4vw, 2.75rem) clamp(1rem, 4vw, 2.5rem) 4rem`, so the shell breathes on a
 desktop and still fits a phone without a second layout.
 
-- **Header** wraps: brand block left, action pills right, separated by `1rem 2rem` and
-  closed by the dashed runway line.
+- **Header** is two rows on desktop: the brand block, then a full-width section nav bar
+  whose receiver-status pill sits at the far right, closed by the dashed runway line.
+  Below 860px it is one row — brand left, status and menu button right — with the links
+  in the disclosure sheet. The brand carries the page title; page-specific actions
+  (map/trace on an aircraft, "In the fleet" on a type) sit under the tagline as small
+  inline links, never in the section nav.
 - **Panels** stack with `1.25rem` between them and `1.2rem 1.35rem 1.35rem` internal
   padding.
 - **Page order** answers the product's two questions first: *Overhead now* → *Summary* →
@@ -306,6 +310,11 @@ desktop and still fits a phone without a second layout.
 - **Type dex** is a photo-led card grid (`repeat(auto-fill, minmax(220px, 1fr))`) with
   14px cards, a 16:10 photo, a 0.9rem name, a 0.72rem mono designator, and a 4px progress
   bar.
+- **Countries** is one ranked table: a sort-chip row, then country, aircraft, share,
+  types, best range and last heard. The share cell carries the page's only graphic — a
+  4px Sky Blue bar with a 2% floor and the percentage beside it. The country column is
+  sticky, like the fleet hex, so the row keeps its identity while the numbers scroll on
+  a phone; each country links to `/?country=XX`.
 - **The fleet table pins its hex column** (`position: sticky; left: 0`) so the row keeps
   its identity while the remaining twelve columns scroll under it on a phone.
 - **A table that can grow without bound is capped** with `scrollbar-gutter: stable` and a
@@ -319,11 +328,14 @@ desktop and still fits a phone without a second layout.
   edge and lets a longer one grow visibly instead of wrapping silently.
 - **Charts** use a two-column grid, `auto minmax(0, 1fr)`, with a 2.1rem y-axis column;
   the SVG scales to width with `height: auto`.
-- **Breakpoints:** 640px for the shell — panel padding drops to `1rem 0.9rem 1.1rem`,
-  blur to 14px, the `.meta` suffix in the tagline is hidden, filter labels take a full
-  line above their chips, and heat cells keep a 14px floor. The type-dex hero collapses
-  at 720px. The card grid also reflows by container query at 30rem (2 columns) and 10rem
-  (1 column), so 200% text drops columns instead of clipping numerals.
+- **Breakpoints:** 860px switches the section nav to the disclosure sheet (eight pills
+  wrap into two rows below it, pushing the live panel down); the tagline is hidden at
+  720px so the brand and the menu button stay on one row; 640px is the shell — panel
+  padding drops to `1rem 0.9rem 1.1rem`, blur to 14px, the `.meta` suffix in the tagline
+  is hidden, filter labels take a full line above their chips, and heat cells keep a
+  14px floor. The type-dex hero also collapses at 720px. The card grid reflows by
+  container query at 30rem (2 columns) and 10rem (1 column), so 200% text drops columns
+  instead of clipping numerals.
 
 ## Elevation & Depth
 
@@ -380,9 +392,26 @@ Recurring geometry:
 ### Pills (header navigation)
 Small frosted capsules, 999px radius, `0.4rem 0.8rem` padding, 0.72rem/500 at 0.04em
 tracking, Muted Slate text. They are links, not buttons: no fill change on hover, the
-text brightens. The live pill carries the four-bar Signal Mint waveform, each bar
-2.5px wide with a 2px gap, animating `scaleY(0.3 → 1)` on a 1.3s ease-in-out loop with
-staggered negative delays.
+text brightens. The link for the page being viewed takes `aria-current="page"`, which
+brightens the text and the hairline to Sky Blue Dim; it is never filled, because the
+selected filter chip is the one filled accent surface. The live pill carries the
+four-bar Signal Mint waveform, each bar 2.5px wide with a 2px gap, animating
+`scaleY(0.3 → 1)` on a 1.3s ease-in-out loop with staggered negative delays.
+
+### Section navigation (all pages)
+One nav for every page: Dashboard, Today, Activity, Types, Records, Countries,
+Coverage, then Open live map. Above 860px it is the pill row. Below 860px the
+same links live in a native `<details>` sheet hung under the header: a 40px
+summary square with the drawn three-line mark (an X while open), and rows
+separated by hairlines with a 2px Sky Blue Dim tick on the current section.
+Both copies are in the markup and each breakpoint hides the other with
+`display`, so the menu opens, closes and reads with no JavaScript; `app.js`
+only adds Escape-dismissal and a tap-outside close. The header sits above the
+panels (`z-index: 20`) so the sheet can overhang them.
+
+The poller status pill keeps its place in the header on a phone. Below 860px its label
+drops to the state word (`live` / `stalled` / `down`) — the dot carries the colour and
+the `title` keeps the age; the menu button is never allowed to wrap onto a second row.
 
 ### Chips (fleet filters)
 Same capsule as a pill but smaller (`0.32rem 0.72rem`, 0.72rem/500). Unselected: glass
@@ -674,11 +703,12 @@ One noun per concept, everywhere. These are the words; anything else is a bug.
 - **Don't** put `backdrop-filter` on a `.card` or the search field. Both only ever sit
   on a `.glass` panel, whose backdrop is already blurred, so the second blur is
   invisible and costs a raster each. Blur belongs to the surfaces that meet the raw
-  body: `.glass`, `.pill`, `.mark`.
+  body: `.glass`, `.pill`, `.mark`, `.nav-toggle`, `.nav-sheet`.
 - **Don't** fill a panel, card or row with Sky Blue; the selected chip is the single
   filled accent surface.
 - **Don't** place a tooltip inside a `.glass` panel: `backdrop-filter` makes the panel the
   containing block for `position: fixed`, so the tooltip lands offset and under later
   panels. Keep it a direct child of `<body>`.
 - **Don't** add a second sans family, a display serif, or an icon set; the inline SVG
-  aircraft mark is the only logo asset.
+  aircraft mark is the only logo, and `static/favicon.svg` is the same mark on a
+  32px night-ground tile (the PNG is rasterized from it, not drawn separately).

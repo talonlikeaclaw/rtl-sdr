@@ -5,6 +5,8 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="theme-color" content="#060a15">
   <title>Today · plane-stats</title>
+  <link rel="icon" href="/favicon.svg?v=1" type="image/svg+xml">
+  <link rel="icon" href="/favicon-32.png?v=1" sizes="32x32" type="image/png">
   <link rel="stylesheet" href="/app.css?v=2">
   <script src="/app.js" defer></script>
 </head>
@@ -30,13 +32,9 @@
           <p class="tagline">{{ summary.day }} · everything the receiver heard since local midnight.<span class="meta">ADS-B</span></p>
         </div>
       </div>
-      <nav class="hero-actions" aria-label="Primary">
-        <a class="pill" href="/">← Dashboard</a>
-        <a class="pill" href="/activity">Activity</a>
-        <a class="pill" href="/types">Types</a>
-        <a class="pill" href="/coverage">Coverage</a>
-        <a class="pill" href="{{ tar1090 }}/" target="_blank" rel="noopener">Open live map</a>
-      </nav>
+      <div class="hero-tools">
+        {% include "partials/nav.html" %}
+      </div>
     </header>
 
     <main id="main">

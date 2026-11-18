@@ -5,6 +5,8 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="theme-color" content="#060a15">
   <title>Activity · plane-stats</title>
+  <link rel="icon" href="/favicon.svg?v=1" type="image/svg+xml">
+  <link rel="icon" href="/favicon-32.png?v=1" sizes="32x32" type="image/png">
   <link rel="stylesheet" href="/app.css?v=2">
   <script src="/app.js" defer></script>
 </head>
@@ -30,13 +32,9 @@
           <p class="tagline">When the sky is busy, and how far you hear.<span class="meta">ADS-B</span></p>
         </div>
       </div>
-      <nav class="hero-actions" aria-label="Primary">
-        <a class="pill" href="/">← Dashboard</a>
-        <a class="pill" href="/today">Today</a>
-        <a class="pill" href="/types">Types</a>
-        <a class="pill" href="/coverage">Coverage</a>
-        <a class="pill" href="{{ tar1090 }}/" target="_blank" rel="noopener">Open live map</a>
-      </nav>
+      <div class="hero-tools">
+        {% include "partials/nav.html" %}
+      </div>
     </header>
 
     <main id="main">
@@ -124,6 +122,120 @@
               <tbody>
                 {% for p in range.points %}
                 <tr><td>{{ p.label }}</td><td>{{ p.value_str() }} nm</td></tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
+        </details>
+        {% endif %}
+      </section>
+
+      <section class="glass panel" aria-label="Unique aircraft by day">
+        <h2>Unique aircraft by day</h2>
+        {% if unique.points.is_empty() %}
+        <p class="empty-note">No ledger data yet. This series starts at deploy.</p>
+        {% else %}
+        <div class="chart">
+          <div class="chart-body">
+            <div class="chart-y" aria-hidden="true">
+              {% for l in unique.y_labels %}<span style="top: {{ l.top }}%">{{ l.text }}</span>{% endfor %}
+            </div>
+            <svg viewBox="0 0 {{ unique.width }} {{ unique.height }}" role="img" aria-label="Unique aircraft per day">
+              {% for l in unique.y_labels %}
+              <line class="chart-grid" x1="{{ unique.plot_left }}" x2="{{ unique.plot_right }}" y1="{{ l.y }}" y2="{{ l.y }}"></line>
+              {% endfor %}
+              <path class="chart-area" d="{{ unique.area }}"></path>
+              <path class="chart-line" d="{{ unique.path }}"></path>
+              {% for p in unique.points %}
+              <circle class="chart-dot" cx="{{ p.x }}" cy="{{ p.y }}" r="2.4"><title>{{ p.label }} · {{ p.value_str() }} aircraft</title></circle>
+              {% endfor %}
+            </svg>
+            <div class="chart-axis"><span>{{ unique.first_label }}</span><span>aircraft</span><span>{{ unique.last_label }}</span></div>
+          </div>
+        </div>
+        <details class="chart-table">
+          <summary>Show as table</summary>
+          <div class="table-wrap">
+            <table>
+              <caption class="sr-only">Unique aircraft per day</caption>
+              <thead><tr><th scope="col">Day</th><th scope="col">Unique aircraft</th></tr></thead>
+              <tbody>{% for p in unique.points %}<tr><td>{{ p.label }}</td><td>{{ p.value_str() }}</td></tr>{% endfor %}</tbody>
+            </table>
+          </div>
+        </details>
+        {% endif %}
+      </section>
+
+      <section class="glass panel" aria-label="New aircraft by day">
+        <h2>New aircraft by day</h2>
+        {% if new.points.is_empty() %}
+        <p class="empty-note">No first sightings in the last 90 days.</p>
+        {% else %}
+        <div class="chart">
+          <div class="chart-body">
+            <div class="chart-y" aria-hidden="true">
+              {% for l in new.y_labels %}<span style="top: {{ l.top }}%">{{ l.text }}</span>{% endfor %}
+            </div>
+            <svg viewBox="0 0 {{ new.width }} {{ new.height }}" role="img" aria-label="New aircraft per day">
+              {% for l in new.y_labels %}
+              <line class="chart-grid" x1="{{ new.plot_left }}" x2="{{ new.plot_right }}" y1="{{ l.y }}" y2="{{ l.y }}"></line>
+              {% endfor %}
+              <path class="chart-area" d="{{ new.area }}"></path>
+              <path class="chart-line" d="{{ new.path }}"></path>
+              {% for p in new.points %}
+              <circle class="chart-dot" cx="{{ p.x }}" cy="{{ p.y }}" r="2.4"><title>{{ p.label }} · {{ p.value_str() }} new</title></circle>
+              {% endfor %}
+            </svg>
+            <div class="chart-axis"><span>{{ new.first_label }}</span><span>new aircraft</span><span>{{ new.last_label }}</span></div>
+          </div>
+        </div>
+        <p class="chart-note">Covers the full aircraft history, unlike the ledger-backed series.</p>
+        <details class="chart-table">
+          <summary>Show as table</summary>
+          <div class="table-wrap">
+            <table>
+              <caption class="sr-only">New aircraft per day</caption>
+              <thead><tr><th scope="col">Day</th><th scope="col">New aircraft</th></tr></thead>
+              <tbody>{% for p in new.points %}<tr><td>{{ p.label }}</td><td>{{ p.value_str() }}</td></tr>{% endfor %}</tbody>
+            </table>
+          </div>
+        </details>
+        {% endif %}
+      </section>
+
+      <section class="glass panel" aria-label="Network coverage by day">
+        <h2>Network coverage by day</h2>
+        {% if coverage_chart.points.is_empty() %}
+        <p class="empty-note">No network coverage data yet. Days with no local polls are omitted.</p>
+        {% else %}
+        <div class="chart">
+          <div class="chart-body">
+            <div class="chart-y" aria-hidden="true">
+              {% for l in coverage_chart.y_labels %}<span style="top: {{ l.top }}%">{{ l.text }}</span>{% endfor %}
+            </div>
+            <svg viewBox="0 0 {{ coverage_chart.width }} {{ coverage_chart.height }}" role="img" aria-label="Share of network traffic heard locally, percent per day">
+              {% for l in coverage_chart.y_labels %}
+              <line class="chart-grid" x1="{{ coverage_chart.plot_left }}" x2="{{ coverage_chart.plot_right }}" y1="{{ l.y }}" y2="{{ l.y }}"></line>
+              {% endfor %}
+              <path class="chart-area" d="{{ coverage_chart.area }}"></path>
+              <path class="chart-line" d="{{ coverage_chart.path }}"></path>
+              {% for p in coverage_chart.points %}
+              <circle class="chart-dot" cx="{{ p.x }}" cy="{{ p.y }}" r="2.4"><title>{{ p.label }} · {{ p.value_str() }}% covered</title></circle>
+              {% endfor %}
+            </svg>
+            <div class="chart-axis"><span>{{ coverage_chart.first_label }}</span><span>% covered</span><span>{{ coverage_chart.last_label }}</span></div>
+          </div>
+        </div>
+        <p class="chart-note">Days with no local polls are omitted.</p>
+        <details class="chart-table">
+          <summary>Show as table</summary>
+          <div class="table-wrap">
+            <table>
+              <caption class="sr-only">Network coverage per day</caption>
+              <thead><tr><th scope="col">Day</th><th scope="col">Local</th><th scope="col">Network</th><th scope="col">Overlap</th><th scope="col">Cover</th></tr></thead>
+              <tbody>
+                {% for d in coverage %}
+                <tr><td>{{ d.day }}</td><td>{{ d.local }}</td><td>{{ d.network }}</td><td>{{ d.overlap }}</td><td>{% if let Some(p) = d.cover_str() %}{{ p }}%{% else %}-{% endif %}</td></tr>
                 {% endfor %}
               </tbody>
             </table>

@@ -13,12 +13,14 @@ readsb and tar1090. The local and network pollers are the only writers.
 | Path             | What it shows                                                                                                          |
 | ---------------- | ---------------------------------------------------------------------------------------------------------------------- |
 | `/`              | Fleet table: search, sort, filter chips, pagination (100/page), live "overhead now" panel, summary cards               |
-| `/aircraft/:hex` | Aircraft profile: visits, callsigns, records, registration/type enrichment, emergency history, tar1090 map/trace links |
+| `/aircraft/:hex` | Aircraft profile: identity/country, visits, schedule/streaks, callsigns, records, route, registration/type enrichment, emergency history, tar1090 map/trace links |
 | `/today`         | Daily digest: unique/new aircraft, hour histogram, records vs prior days                                               |
-| `/coverage`      | Local receiver vs adsb.fi within 100 NM: overlap, only-you, missed                                                     |
-| `/activity`      | 7×24 weekday/hour heatmap, range-by-day and messages-by-day charts                                                     |
+| `/coverage`      | Receiver polar coverage plus local vs adsb.fi within 100 NM: overlap, only-you, missed                                  |
+| `/activity`      | 7×24 weekday/hour heatmap, range/messages/unique/new/network-coverage charts                                           |
 | `/types`         | Type dex: every ICAO type designator heard, with photo and catch stats                                                 |
 | `/type/:code`    | Type profile: ICAO Doc 8643 specs, Wikipedia extract/photo, Wikidata facts, airframes seen                             |
+| `/records`       | One-hit wonders, longest overhead passes, steepest climbs/descents, oldest airframes, rarest types, top callsigns      |
+| `/countries`     | Every state of registry heard, ranked by airframes, with share, types, best range and last heard                       |
 
 tar1090 deep links (`?icao=<hex>`, `?showTrace=<hex>`) render only while an
 aircraft is live (last seen within 60 s).
@@ -36,8 +38,11 @@ All endpoints return JSON and are read-only.
 | `/api/today`                    | `{summary, hours, records, new}`                     |
 | `/api/coverage`                 | Local vs network live sets                           |
 | `/api/feed`                     | Feeder client, network API and snapshot status       |
-| `/api/activity`                 | Heatmap and chart series                             |
+| `/api/activity`                 | Heatmap and range/messages/unique/new/coverage series |
+| `/api/polar`                    | Receiver polar coverage by 10° sector                |
+| `/api/records`                  | Records and rarities                                 |
 | `/api/types`, `/api/type/:code` | Type dex and one designator                          |
+| `/api/countries`                | States of registry with aircraft, share, types, best range and last heard |
 | `/api/stats`                    | All-time aggregates (uncached; UI uses a 10 s cache) |
 
 HTMX partials live under `/partials/{table,table/rows,cards,emergencies,live,coverage,feed}`.
@@ -76,6 +81,11 @@ docker logs --tail 20 plane-stats
 | `NETWORK_STATS_SECS`| `300`                                         | Network totals refresh interval (minimum 60 s)             |
 | `NETWORK_COVERAGE_SECS` | `600`                                     | Nearby-feeder coverage refresh interval (minimum 60 s)     |
 | `FEED_JSON`         | `/run/adsbfi-feed/aircraft.json`              | Host feeder status file, mounted read-only                 |
+| `ROUTE_LOOKUP`      | `on`                                          | `off` disables all adsbdb requests                         |
+| `ROUTE_API`         | `https://api.adsbdb.com/v0`                   | adsbdb API base                                            |
+| `ROUTE_TTL_SECS`    | `604800`                                      | Positive route cache TTL (7 days)                          |
+| `ROUTE_NEG_TTL_SECS`| `2592000`                                     | Negative route cache TTL (30 days)                         |
+| `ROUTE_POLL_SECS`   | `60`                                          | Route resolver cycle                                       |
 | `TZ`                | container default                             | Local day/hour bucketing (`chrono::Local`)                 |
 | `RUST_LOG`          | `plane_stats=info`                            | Log filter                                                 |
 
@@ -87,8 +97,9 @@ SQLite tables are created on boot (`CREATE TABLE IF NOT EXISTS`); schema changes
 are additive via `NEW_COLUMNS` in `src/main.rs`.
 
 - `aircraft` — one row per hex: first/last seen, sightings, callsign/squawk/
-  category, all-time records, last position/track, `db_flags`, last live state
-  (`last_*` columns drive the overhead panel).
+  category, state of registry (`country`, from ICAO address blocks), all-time
+  records, last position/track, `db_flags`, last live state (`last_*` columns
+  drive the overhead panel).
 - `visits` — one row per continuous pass (a gap > 10 min starts a new visit).
 - `aircraft_callsigns` — callsigns seen per hex.
 - `poll_log` / `poll_hour` — per-poll and hourly aircraft counts; `poll_log` is
@@ -103,12 +114,20 @@ are additive via `NEW_COLUMNS` in `src/main.rs`.
 - `emergency_log` — squawk/emergency events.
 - `aircraft_types` / `type_wiki_map` — cached Doc 8643 specs and Wikipedia
   profiles for the type dex.
+- `range_sector` — best range per local day per 10° bearing sector (36 rows/day,
+  never pruned); feeds `/coverage` and `/api/polar`. A one-shot backfill reads
+  tar1090's persisted heatmap (`tar1090_globe_history` mounted at
+  `/globe_history`) for the days before plane-stats started recording sectors.
 
 `aircraft` and `visits` are never pruned. The database lives on the named
 volume `sdr_plane_stats_db`.
 
 Network data comes from [adsb.fi](https://adsb.fi/); the poller sends
 `plane-stats/0.1 (adsb.fi feeder)` and stays within the public 1 req/s limit.
+
+Flight routes come from [adsbdb.com](https://www.adsbdb.com/) under a
+memory-only cache: routes are never written to SQLite or exported, per the
+provider's terms. Set `ROUTE_LOOKUP=off` to disable the resolver.
 
 ### Enrichment reload
 

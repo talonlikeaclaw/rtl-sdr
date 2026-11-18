@@ -27,6 +27,7 @@
         <button type="button" class="sort"
                 hx-get="/partials/table?sort=registration&dir={% if sort == "registration" && dir == "asc" %}desc{% else %}asc{% endif %}"
                 hx-target="#fleet" hx-include="#fleet-controls">Registration</button></th>
+      <th scope="col">Country</th>
       <th scope="col" class="{% if sort == "typecode" %}active {{ dir }}{% endif %}"
           {% if sort == "typecode" %}aria-sort="{% if dir == "asc" %}ascending{% else %}descending{% endif %}"{% endif %}>
         <button type="button" class="sort"

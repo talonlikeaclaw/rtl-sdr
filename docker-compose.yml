@@ -60,6 +60,10 @@ services:
       # readsb emits no `dbFlags` at all (military/interesting/PIA/LADD), and
       # plane-stats' flag chips stay empty.
       TAR1090_ENABLE_AC_DB: "true"
+      # Persist per-airframe globe traces alongside the heatmap. One gzipped
+      # JSON per day per aircraft, retained by MAX_GLOBE_HISTORY.
+      READSB_ENABLE_TRACES: "true"
+      MAX_GLOBE_HISTORY: "14"
 
   plane-stats:
     profiles: [adsb]
@@ -71,6 +75,7 @@ services:
     volumes:
       - plane_stats_db:/data
       - /run/adsbfi-feed:/run/adsbfi-feed:ro
+      - tar1090_globe_history:/globe_history:ro
     ports:
       - "8081:8081"
     environment:
@@ -88,6 +93,12 @@ services:
       NETWORK_STATS_SECS: ${NETWORK_STATS_SECS:-300}
       NETWORK_COVERAGE_SECS: ${NETWORK_COVERAGE_SECS:-600}
       FEED_JSON: /run/adsbfi-feed/aircraft.json
+      ROUTE_LOOKUP: ${ROUTE_LOOKUP:-on}
+      ROUTE_API: ${ROUTE_API:-https://api.adsbdb.com/v0}
+      ROUTE_TTL_SECS: ${ROUTE_TTL_SECS:-604800}
+      ROUTE_NEG_TTL_SECS: ${ROUTE_NEG_TTL_SECS:-2592000}
+      ROUTE_POLL_SECS: ${ROUTE_POLL_SECS:-60}
+      GLOBE_HISTORY: /globe_history
 
 volumes:
   readsb_rrd:

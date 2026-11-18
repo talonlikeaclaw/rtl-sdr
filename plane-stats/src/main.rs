@@ -2,11 +2,14 @@ use std::sync::{Arc, Mutex};
 
 use rusqlite::{Connection, OptionalExtension};
 
+mod country;
 mod dbflags;
 mod enrichment;
 mod mil;
 mod network;
 mod poller;
+mod rangebackfill;
+mod routes;
 mod stats;
 mod types;
 mod web;
@@ -151,6 +154,13 @@ fn main() {
            owner TEXT,
            year TEXT,
            updated_at REAL NOT NULL
+         );
+         CREATE TABLE IF NOT EXISTS range_sector (
+           day TEXT NOT NULL,
+           sector INTEGER NOT NULL,
+           max_range_nm REAL NOT NULL,
+           polls INTEGER NOT NULL DEFAULT 1,
+           PRIMARY KEY (day, sector)
          );",
     )
     .expect("run migrations");
@@ -183,6 +193,7 @@ fn main() {
         ("aircraft", "last_baro_rate", "REAL"),
         ("aircraft", "last_msg_age", "REAL"),
         ("aircraft", "db_flags", "INTEGER"),
+        ("aircraft", "country", "TEXT"),
     ];
     for (table, col, ddl) in NEW_COLUMNS {
         if let Err(e) = conn.execute(&format!("ALTER TABLE {table} ADD COLUMN {col} {ddl}"), []) {
@@ -287,6 +298,14 @@ fn main() {
         Err(e) => tracing::warn!("tar1090 flag backfill failed: {e}"),
     }
 
+    // Rows recorded before the country column existed get their state of
+    // registry from the committed ICAO address blocks.
+    match country::backfill(&db) {
+        Ok(0) => {}
+        Ok(n) => tracing::info!("country backfilled on {n} aircraft"),
+        Err(e) => tracing::warn!("country backfill failed: {e}"),
+    }
+
     // The 520k-row enrichment insert leaves a WAL as large as the database.
     if let Err(e) = crate::db_lock(&db).execute_batch("PRAGMA wal_checkpoint(TRUNCATE)") {
         tracing::warn!("wal checkpoint failed: {e}");
@@ -302,6 +321,18 @@ fn main() {
         // Doc 8643 + Wikipedia profiles are cached in SQLite; the task never
         // blocks startup and every page renders without it.
         tokio::spawn(types::run(db.clone()));
+        // adsbdb routes live only in the resolver's memory cache (see routes.rs).
+        tokio::spawn(routes::run(db.clone()));
+        // One-shot: seed `range_sector` from tar1090's persisted heatmap, which
+        // is the only historical position source. No-op once stamped.
+        let backfill_db = db.clone();
+        tokio::spawn(async move {
+            match tokio::task::spawn_blocking(move || rangebackfill::run(&backfill_db)).await {
+                Ok(Ok(())) => {}
+                Ok(Err(e)) => tracing::warn!("coverage backfill failed: {e}"),
+                Err(e) => tracing::warn!("coverage backfill task failed: {e}"),
+            }
+        });
 
         let app = web::router(db);
         let listener = tokio::net::TcpListener::bind("0.0.0.0:8081").await.expect("bind 8081");

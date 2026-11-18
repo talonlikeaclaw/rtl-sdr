@@ -12,6 +12,11 @@ use crate::Db;
 const HTMX: &[u8] = include_bytes!("../static/htmx.min.js");
 const APP_CSS: &[u8] = include_bytes!("../static/app.css");
 const APP_JS: &[u8] = include_bytes!("../static/app.js");
+/* The aircraft mark on a night-ground tile. SVG for modern tabs, a 32px PNG
+   for engines without SVG favicons; `/favicon.ico` is the same PNG so a
+   browser probing the default path never gets the HTML error page. */
+const FAVICON_SVG: &[u8] = include_bytes!("../static/favicon.svg");
+const FAVICON_PNG: &[u8] = include_bytes!("../static/favicon-32.png");
 
 pub fn router(db: Db) -> Router {
     Router::new()
@@ -20,9 +25,13 @@ pub fn router(db: Db) -> Router {
         .route("/coverage", get(coverage_page))
         .route("/partials/coverage", get(coverage_partial))
         .route("/api/coverage", get(api_coverage))
+        .route("/api/polar", get(api_polar))
         .route("/activity", get(activity_page))
+        .route("/records", get(records_page))
+        .route("/api/records", get(api_records))
         .route("/types", get(types_page))
         .route("/type/:code", get(type_page))
+        .route("/countries", get(countries_page))
         .route("/aircraft/:hex", get(aircraft_profile))
         .route("/api/aircraft/:hex", get(api_aircraft_hex))
         .route("/partials/table", get(table_partial))
@@ -39,10 +48,14 @@ pub fn router(db: Db) -> Router {
         .route("/api/activity", get(api_activity))
         .route("/api/types", get(api_types))
         .route("/api/type/:code", get(api_type))
+        .route("/api/countries", get(api_countries))
         .route("/api/stats", get(api_stats))
         .route("/htmx.min.js", get(htmx_js))
         .route("/app.css", get(app_css))
         .route("/app.js", get(app_js))
+        .route("/favicon.svg", get(favicon_svg))
+        .route("/favicon-32.png", get(favicon_png))
+        .route("/favicon.ico", get(favicon_png))
         // Every miss is the same page. axum's default is a bare "404 Not Found"
         // in plain text, which is the one surface this app does not have.
         .fallback(not_found)
@@ -127,6 +140,8 @@ struct IndexTemplate {
     counts: stats::FilterCounts,
     poller: stats::PollerHealth,
     feed: stats::FeederStatus,
+    /// Which section link carries `aria-current="page"`.
+    active: &'static str,
     tar1090: String,
     now: f64,
     rx: Option<(f64, f64)>,
@@ -137,6 +152,7 @@ struct IndexTemplate {
     to_row: u32,
     prev_page: Option<u32>,
     next_page: Option<u32>,
+    countries: Vec<stats::CountryCount>,
 }
 
 /// Pager state for the all-time fleet table.
@@ -219,6 +235,7 @@ async fn index(
     let now = now();
     let view = fleet_view(&db, &q, now)?;
     let st = stats::stats_cached(&db, now)?;
+    let countries = stats::country_counts(&db)?;
     let live = stats::live_aircraft(&db, now)?;
     let recent = stats::recent_arrivals(&db)?;
     let emergencies = stats::emergency_log(&db, 20)?;
@@ -239,6 +256,7 @@ async fn index(
             counts: view.counts,
             poller,
             feed,
+            active: "dashboard",
             tar1090: tar1090_base(&headers),
             now,
             rx: stats::rx_pos(),
@@ -249,6 +267,7 @@ async fn index(
             to_row: view.nav.to_row,
             prev_page: view.nav.prev_page,
             next_page: view.nav.next_page,
+            countries,
         }
         .render()?,
     ))
@@ -286,6 +305,8 @@ struct SortParams {
     alt_min: Option<String>,
     #[serde(default)]
     alt_max: Option<String>,
+    #[serde(default)]
+    country: String,
 }
 
 impl SortParams {
@@ -307,6 +328,12 @@ impl SortParams {
             dormant: self.dormant.as_deref() == Some("1"),
             alt_min: parse_alt(&self.alt_min),
             alt_max: parse_alt(&self.alt_max),
+            country: if self.country.len() == 2 && self.country.bytes().all(|b| b.is_ascii_alphabetic())
+            {
+                self.country.to_ascii_uppercase()
+            } else {
+                String::new()
+            },
         }
     }
 }
@@ -362,6 +389,9 @@ fn fleet_query(filter: &stats::FleetFilter) -> String {
     }
     if let Some(v) = filter.alt_max {
         parts.push(format!("alt_max={v}"));
+    }
+    if !filter.country.is_empty() {
+        parts.push(format!("country={}", filter.country));
     }
     if parts.is_empty() { "/?".to_string() } else { format!("/?{}&", parts.join("&")) }
 }
@@ -534,6 +564,7 @@ struct TodayTemplate {
     hours_max: i64,
     records: Vec<stats::DayRecord>,
     new: Vec<AircraftRow>,
+    active: &'static str,
     tar1090: String,
 }
 
@@ -548,6 +579,7 @@ async fn today_page(State(db): State<Db>, headers: HeaderMap) -> Result<Html<Str
             hours_max,
             records: stats::records_today(&db, now)?,
             new: stats::new_today(&db, now)?,
+            active: "today",
             tar1090: tar1090_base(&headers),
         }
         .render()?,
@@ -574,6 +606,11 @@ struct ActivityTemplate {
     hours_full: Vec<String>,
     range: stats::LineChart,
     messages: stats::LineChart,
+    unique: stats::LineChart,
+    new: stats::LineChart,
+    coverage_chart: stats::LineChart,
+    coverage: Vec<stats::CoverageDay>,
+    active: &'static str,
     tar1090: String,
 }
 
@@ -582,6 +619,13 @@ async fn activity_page(State(db): State<Db>, headers: HeaderMap) -> Result<Html<
     let heatmap = stats::weekday_hour_heatmap(&db)?;
     let range = stats::range_by_day(&db, now)?;
     let messages = stats::messages_by_day(&db, now)?;
+    let unique = stats::unique_by_day(&db, now)?;
+    let new = stats::new_by_day(&db, now)?;
+    let coverage = stats::coverage_by_day(&db, now)?;
+    let coverage_series: Vec<stats::DayValue> = coverage
+        .iter()
+        .filter_map(|d| d.cover_pct.map(|v| stats::DayValue { day: d.day.clone(), value: v }))
+        .collect();
     let hours = (0..24)
         .map(|h| if h % 3 == 0 { format!("{h:02}") } else { String::new() })
         .collect();
@@ -593,6 +637,11 @@ async fn activity_page(State(db): State<Db>, headers: HeaderMap) -> Result<Html<
             hours_full,
             range: stats::LineChart::build(&range),
             messages: stats::LineChart::build(&messages),
+            unique: stats::LineChart::build(&unique),
+            new: stats::LineChart::build(&new),
+            coverage_chart: stats::LineChart::build_bounded(&coverage_series, Some(0.0), Some(100.0)),
+            coverage,
+            active: "activity",
             tar1090: tar1090_base(&headers),
         }
         .render()?,
@@ -604,20 +653,52 @@ async fn api_activity(State(db): State<Db>) -> Result<Json, ApiError> {
 }
 
 #[derive(Template)]
-#[template(path = "coverage.html")]
-struct CoverageTemplate {
-    coverage: stats::NetworkCoverage,
+#[template(path = "records.html")]
+struct RecordsTemplate {
+    records: stats::Records,
+    active: &'static str,
     tar1090: String,
 }
 
-async fn coverage_page(State(db): State<Db>, headers: HeaderMap) -> Result<Html<String>, AppError> {
+async fn records_page(State(db): State<Db>, headers: HeaderMap) -> Result<Html<String>, AppError> {
     Ok(Html(
-        CoverageTemplate {
-            coverage: stats::network_coverage(&db, now())?,
+        RecordsTemplate {
+            records: stats::records(&db)?,
+            active: "records",
             tar1090: tar1090_base(&headers),
         }
         .render()?,
     ))
+}
+
+async fn api_records(State(db): State<Db>) -> Result<Json, ApiError> {
+    Ok(Json(serde_json::to_value(stats::records(&db)?)?))
+}
+
+#[derive(Template)]
+#[template(path = "coverage.html")]
+struct CoverageTemplate {
+    coverage: stats::NetworkCoverage,
+    polar: stats::PolarChart,
+    active: &'static str,
+    tar1090: String,
+}
+
+async fn coverage_page(State(db): State<Db>, headers: HeaderMap) -> Result<Html<String>, AppError> {
+    let now = now();
+    Ok(Html(
+        CoverageTemplate {
+            coverage: stats::network_coverage(&db, now)?,
+            polar: stats::receiver_polar(&db, now)?,
+            active: "coverage",
+            tar1090: tar1090_base(&headers),
+        }
+        .render()?,
+    ))
+}
+
+async fn api_polar(State(db): State<Db>) -> Result<Json, ApiError> {
+    Ok(Json(serde_json::to_value(stats::receiver_polar(&db, now())?)?))
 }
 
 #[derive(Template)]
@@ -658,6 +739,7 @@ struct TypesTemplate {
     q: String,
     /// `&q=...` for the sort links, empty when the search box is blank.
     q_suffix: String,
+    active: &'static str,
     tar1090: String,
 }
 
@@ -703,6 +785,7 @@ async fn types_page(
             sort,
             q: search,
             q_suffix,
+            active: "types",
             tar1090: tar1090_base(&headers),
         }
         .render()?,
@@ -713,6 +796,7 @@ async fn types_page(
 #[template(path = "type.html")]
 struct TypeTemplate {
     detail: stats::TypeDetail,
+    active: &'static str,
     tar1090: String,
 }
 
@@ -727,6 +811,7 @@ async fn type_page(
             title: "Not in the type dex",
             message: "That is not an ICAO type designator.".to_string(),
             detail: "A designator is two to four letters or digits, like B738, A20N or C172.",
+            active: "",
             tar1090: tar1090_base(&headers),
         }
         .render()?;
@@ -737,12 +822,64 @@ async fn type_page(
             title: "Not in the type dex",
             message: format!("No {code} has been heard yet."),
             detail: "The dex only lists types the receiver has actually logged. Browse the fleet or the dex from the dashboard.",
+            active: "",
             tar1090: tar1090_base(&headers),
         }
         .render()?;
         return Ok((StatusCode::NOT_FOUND, Html(body)).into_response());
     };
-    Ok(Html(TypeTemplate { detail, tar1090: tar1090_base(&headers) }.render()?).into_response())
+    Ok(Html(
+        TypeTemplate { detail, active: "types", tar1090: tar1090_base(&headers) }.render()?,
+    )
+    .into_response())
+}
+
+#[derive(Deserialize, Default)]
+struct CountryParams {
+    #[serde(default)]
+    sort: String,
+}
+
+#[derive(Template)]
+#[template(path = "countries.html")]
+struct CountriesTemplate {
+    rows: Vec<stats::CountryRow>,
+    sort: String,
+    active: &'static str,
+    tar1090: String,
+}
+
+fn country_sort(raw: &str) -> String {
+    match raw {
+        "name" | "recent" | "range" => raw.to_string(),
+        _ => "count".to_string(),
+    }
+}
+
+async fn countries_page(
+    State(db): State<Db>,
+    Query(q): Query<CountryParams>,
+    headers: HeaderMap,
+) -> Result<Html<String>, AppError> {
+    let sort = country_sort(&q.sort);
+    let rows = stats::country_rows(&db, &sort)?;
+    Ok(Html(
+        CountriesTemplate {
+            rows,
+            sort,
+            active: "countries",
+            tar1090: tar1090_base(&headers),
+        }
+        .render()?,
+    ))
+}
+
+async fn api_countries(
+    State(db): State<Db>,
+    Query(q): Query<CountryParams>,
+) -> Result<Json, ApiError> {
+    let sort = country_sort(&q.sort);
+    Ok(Json(serde_json::to_value(stats::country_rows(&db, &sort)?)?))
 }
 
 async fn api_types(State(db): State<Db>) -> Result<Json, ApiError> {
@@ -795,6 +932,7 @@ struct ErrorTemplate {
     title: &'static str,
     message: String,
     detail: &'static str,
+    active: &'static str,
     tar1090: String,
 }
 
@@ -805,6 +943,9 @@ struct AircraftTemplate {
     enrich: Option<stats::Enrichment>,
     callsigns: Vec<stats::CallsignRow>,
     visits: Vec<VisitView>,
+    schedule: stats::Schedule,
+    route: Option<crate::routes::Route>,
+    active: &'static str,
     tar1090: String,
     now: f64,
 }
@@ -851,6 +992,7 @@ async fn aircraft_profile(
             title: "Not in the ledger",
             message: "That is not an ICAO address.".to_string(),
             detail: "A hex address is one to eight hexadecimal digits, like a1b2c3. Search the fleet from the dashboard instead.",
+            active: "",
             tar1090: tar1090_base(&headers),
         }
         .render()?;
@@ -861,6 +1003,7 @@ async fn aircraft_profile(
             title: "Not in the ledger",
             message: format!("No aircraft with hex {hex}."),
             detail: "The receiver has not logged this address. Check the hex, or search the fleet from the dashboard.",
+            active: "",
             tar1090: tar1090_base(&headers),
         }
         .render()?;
@@ -868,6 +1011,8 @@ async fn aircraft_profile(
     };
     let enrich = stats::enrichment_for(&db, &hex)?;
     let callsigns = stats::callsigns_for(&db, &hex)?;
+    let schedule = stats::schedule_for(&db, &hex)?;
+    let route = crate::routes::for_hex(&db, &hex);
     let visits = stats::visits_for(&db, &hex)?
         .into_iter()
         .map(|v| VisitView {
@@ -883,6 +1028,9 @@ async fn aircraft_profile(
             enrich,
             callsigns,
             visits,
+            schedule,
+            route,
+            active: "",
             tar1090: tar1090_base(&headers),
             now: now(),
         }
@@ -905,11 +1053,15 @@ async fn api_aircraft_hex(
     let enrich = stats::enrichment_for(&db, &hex)?;
     let callsigns = stats::callsigns_for(&db, &hex)?;
     let visits = stats::visits_for(&db, &hex)?;
+    let schedule = stats::schedule_for(&db, &hex)?;
+    let route = crate::routes::for_hex(&db, &hex);
     Ok(Json(serde_json::json!({
         "aircraft": row,
         "enrichment": enrich,
         "callsigns": callsigns,
         "visits": visits,
+        "schedule": schedule,
+        "route": route,
     })))
 }
 impl From<rusqlite::Error> for AppError {
@@ -974,6 +1126,26 @@ async fn app_js() -> impl IntoResponse {
     )
 }
 
+async fn favicon_svg() -> impl IntoResponse {
+    (
+        [
+            (header::CONTENT_TYPE, "image/svg+xml"),
+            (header::CACHE_CONTROL, "public, max-age=86400"),
+        ],
+        FAVICON_SVG,
+    )
+}
+
+async fn favicon_png() -> impl IntoResponse {
+    (
+        [
+            (header::CONTENT_TYPE, "image/png"),
+            (header::CACHE_CONTROL, "public, max-age=86400"),
+        ],
+        FAVICON_PNG,
+    )
+}
+
 /// Any unmatched path. A miss gets the same shell and the same way back as a
 /// dead hex link; `/api/*` keeps answering JSON.
 async fn not_found(uri: axum::http::Uri, headers: HeaderMap) -> Response {
@@ -983,7 +1155,8 @@ async fn not_found(uri: axum::http::Uri, headers: HeaderMap) -> Response {
     let rendered = ErrorTemplate {
         title: "Not in the ledger",
         message: "That page does not exist.".to_string(),
-        detail: "The dashboard, Today and Activity are the three pages. Search the fleet from the dashboard.",
+        detail: CLIENT_DETAIL,
+        active: "",
         tar1090: tar1090_base(&headers),
     }
     .render();
@@ -1014,7 +1187,7 @@ const SERVER_DETAIL: &str =
 /// What a page-level 4xx says when it goes through `AppError` rather than
 /// building its own `ErrorTemplate` (the hex and miss pages do the latter).
 const CLIENT_DETAIL: &str =
-    "The dashboard, Today and Activity are the three pages. Search the fleet from the dashboard.";
+    "Use the section bar to pick a page, or search the fleet from the dashboard.";
 
 impl AppError {
     fn new(status: StatusCode, message: impl Into<String>) -> Self {
@@ -1041,6 +1214,7 @@ impl IntoResponse for AppError {
             title: if self.status.is_server_error() { "Something broke" } else { "Not in the ledger" },
             message: self.message.clone(),
             detail: if self.status.is_server_error() { SERVER_DETAIL } else { CLIENT_DETAIL },
+            active: "",
             tar1090: self.tar1090.clone(),
         }
         .render();

@@ -5,7 +5,10 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="theme-color" content="#060a15">
   <title>{{ row.hex }}{% if let Some(r) = row.registration %} · {{ r }}{% endif %} — plane-stats</title>
+  <link rel="icon" href="/favicon.svg?v=1" type="image/svg+xml">
+  <link rel="icon" href="/favicon-32.png?v=1" sizes="32x32" type="image/png">
   <link rel="stylesheet" href="/app.css?v=2">
+  <script src="/app.js" defer></script>
 </head>
 <body>
   <a class="skip" href="#main">Skip to content</a>
@@ -29,18 +32,20 @@
           <p class="tagline">
             {% if let Some(m) = enrich %}{% if let Some(model) = m.model %}{{ model }}{% if let Some(tc) = m.typecode %}{% if let Some(u) = row.type_url() %} (<a href="{{ u }}">{{ tc }}</a>){% else %} ({{ tc }}){% endif %}{% endif %} · {% endif %}{% if let Some(mf) = m.manufacturer %}{{ mf }} · {% endif %}{% endif %}Aircraft profile
           </p>
+          {% if row.is_live(now) || row.type_url().is_some() %}
+          <p class="page-actions">
+            {% if row.is_live(now) %}
+            <a href="{{ row.map_url(tar1090.as_str()) }}" target="_blank" rel="noopener">Show on map</a>
+            <a href="{{ row.trace_url(tar1090.as_str()) }}" target="_blank" rel="noopener">Show trace</a>
+            {% endif %}
+            {% if let Some(u) = row.type_url() %}<a href="{{ u }}">Type {{ row.type_code() }}</a>{% endif %}
+          </p>
+          {% endif %}
         </div>
       </div>
-      <nav class="hero-actions" aria-label="Primary">
-        <a class="pill" href="{{ tar1090 }}/" target="_blank" rel="noopener">Open live map</a>
-        {% if row.is_live(now) %}
-        <a class="pill" href="{{ row.map_url(tar1090.as_str()) }}" target="_blank" rel="noopener">Show on map</a>
-        <a class="pill" href="{{ row.trace_url(tar1090.as_str()) }}" target="_blank" rel="noopener">Show trace</a>
-        {% endif %}
-        <a class="pill" href="/">← Dashboard</a>
-        {% if let Some(u) = row.type_url() %}<a class="pill" href="{{ u }}">Type {{ row.type_code() }}</a>{% endif %}
-        <a class="pill" href="/types">Type dex</a>
-      </nav>
+      <div class="hero-tools">
+        {% include "partials/nav.html" %}
+      </div>
     </header>
 
     <main id="main">
@@ -51,6 +56,7 @@
             <caption class="sr-only">Registration, model and operator for {{ row.hex }}</caption>
             <tbody>
               {% if row.registration.is_some() || enrich.is_some() %}
+              <tr><th>Country</th><td>{{ row.country_flag() }} {{ row.country_name() }}{% if row.country.is_some() %} <span class="mono">({{ row.country_code() }})</span>{% endif %}</td></tr>
               <tr><th>Registration</th><td class="mono">{{ row.registration.as_deref().unwrap_or("-") }}</td></tr>
               {% if let Some(m) = enrich %}
               <tr><th>Model</th><td>{{ m.model.as_deref().unwrap_or("-") }}{% if let Some(tc) = m.typecode %}{% if let Some(u) = row.type_url() %} (<a href="{{ u }}">{{ tc }}</a>){% else %} ({{ tc }}){% endif %}{% endif %}</td></tr>
@@ -61,6 +67,9 @@
               <tr><th>Owner</th><td>{{ m.owner.as_deref().unwrap_or("-") }}</td></tr>
               <tr><th>Operator</th><td>{{ m.operator.as_deref().unwrap_or("-") }}</td></tr>
               <tr><th>Operator callsign</th><td class="mono">{{ m.operatorcallsign.as_deref().unwrap_or("-") }}</td></tr>
+              {% if let Some(r) = route %}
+              <tr><th>Route</th><td>{{ r.summary() }} · {{ r.airports() }}{% if let Some(a) = r.airline %} · {{ a }}{% endif %}<br><span class="type-credit">Route data: <a href="https://www.adsbdb.com/" target="_blank" rel="noopener">adsbdb.com</a></span></td></tr>
+              {% endif %}
               <tr><th>Serial number</th><td class="mono">{{ m.serialnumber.as_deref().unwrap_or("-") }}</td></tr>
               <tr><th>ICAO type</th><td class="mono">{{ m.icaoaircrafttype.as_deref().unwrap_or("-") }}</td></tr>
               <tr><th>Engines</th><td>{{ m.engines.as_deref().unwrap_or("-") }}</td></tr>
@@ -144,6 +153,51 @@
             </tbody>
           </table>
         </div>
+      </section>
+
+      <section class="glass panel" aria-label="Schedule">
+        <h2>Schedule</h2>
+        {% if schedule.days_heard == 0 %}
+        <p class="empty-note">No visits yet. The schedule fills in once this aircraft has been logged.</p>
+        {% else %}
+        <div class="sched-bars" role="group" aria-label="Visit starts by local hour">
+          {% for h in schedule.hours %}
+          <div class="sched-bar" style="--h: {{ h.pct(schedule.max_count) }}%"
+               title="{{ h.label() }}:00 · {{ h.count }} visits"
+               aria-label="{{ h.label() }}:00, {{ h.count }} visits"></div>
+          {% endfor %}
+        </div>
+        <div class="sched-hours" aria-hidden="true">
+          {% for h in schedule.hours %}<span>{% if h.show_label() %}{{ h.label() }}{% endif %}</span>{% endfor %}
+        </div>
+        <div class="table-wrap">
+          <table>
+            <caption class="sr-only">Days heard and streaks for {{ row.hex }}</caption>
+            <tbody>
+              <tr><th>Days heard</th><td>{{ schedule.days_heard }}</td></tr>
+              <tr><th>Current streak</th><td>{{ schedule.current_streak }} day{% if schedule.current_streak != 1 %}s{% endif %}</td></tr>
+              <tr><th>Longest streak</th><td>{{ schedule.longest_streak }} day{% if schedule.longest_streak != 1 %}s{% endif %}</td></tr>
+              <tr><th>Usual hour</th><td>{{ schedule.typical_str() }}</td></tr>
+              <tr><th>First day</th><td>{{ schedule.first_day.as_deref().unwrap_or("-") }}</td></tr>
+              <tr><th>Last day</th><td>{{ schedule.last_day.as_deref().unwrap_or("-") }}</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <details class="chart-table">
+          <summary>Show all 24 hours</summary>
+          <div class="table-wrap">
+            <table>
+              <caption class="sr-only">Visit starts by local hour</caption>
+              <thead><tr><th scope="col">Hour</th><th scope="col">Visits</th></tr></thead>
+              <tbody>
+                {% for h in schedule.hours %}
+                <tr><td>{{ h.label() }}:00</td><td>{{ h.count }}</td></tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
+        </details>
+        {% endif %}
       </section>
 
       <section class="glass panel" aria-label="Visits">
