@@ -1,5 +1,9 @@
 name: sdr
 
+x-dns: &dns
+  - ${LAN_DNS:-192.168.0.1}
+  - 1.1.1.1
+
 services:
   readsb:
     profiles: [adsb]
@@ -8,6 +12,7 @@ services:
     image: sdr/readsb-v4l:latest
     container_name: readsb
     restart: unless-stopped
+    dns: *dns
     devices:
       - /dev/bus/usb:/dev/bus/usb
     tmpfs:
@@ -42,6 +47,7 @@ services:
     image: ghcr.io/sdr-enthusiasts/docker-tar1090:latest
     container_name: tar1090
     restart: unless-stopped
+    dns: *dns
     depends_on: [readsb]
     tmpfs:
       - /run:exec,size=256M
@@ -71,6 +77,7 @@ services:
     image: sdr/plane-stats:latest
     container_name: plane-stats
     restart: unless-stopped
+    dns: *dns
     depends_on: [tar1090]
     volumes:
       - plane_stats_db:/data

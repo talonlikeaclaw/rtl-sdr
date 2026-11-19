@@ -20,9 +20,26 @@ at `/usr/local/lib/librtlsdr.so.0` (the SONAME readsb links against).
 Regression symptom: no aircraft on the map, and no
 `RTL-SDR Blog V4 Lite Detected` line in `docker logs readsb`.
 
+Second, distinct symptom: `docker compose up -d` after a config change *recreates*
+the container while the old readsb is still streaming, and the new instance can
+open the dongle cleanly (log shows `V4 Lite Detected` + gain) yet decode zero
+messages for minutes — a wedged USB endpoint, invisible in `dmesg`. Verify with
+`curl -s localhost:8080/data/stats.json` (`last1min.messages` stays 0). Recovery:
+`docker compose stop readsb`, run `rtl_test -t` once on the free device, start it
+again. Plain `docker restart readsb` did not clear it.
+
 ## Config
 
-- `.env` holds `TZ`, `READSB_LAT`, `READSB_LON`.
+- `.env` holds `TZ`, `READSB_LAT`, `READSB_LON`, `LAN_DNS` (the router,
+  `192.168.0.1`).
+- Every service pins `dns:` from the `x-dns` anchor (`${LAN_DNS}`, then
+  `1.1.1.1`). Docker snapshots the host `/etc/resolv.conf` when a container
+  starts, and this box's file is Tailscale-owned: `tailscaled` only writes
+  `nameserver 100.100.100.100` after the tailnet is up, which is later than
+  dockerd. Containers created right after a boot therefore got
+  `NO EXTERNAL NAMESERVERS DEFINED` and every outbound request in
+  `plane-stats`/`tar1090` failed with `error sending request for url (...)`
+  until it was recreated. Never drop the `dns:` keys.
 - `READSB_ENABLE_BIASTEE=on` — bias tee powered (antenna LNA). **Do not disable
   without asking the user.**
 - `READSB_GAIN=autogain`.
