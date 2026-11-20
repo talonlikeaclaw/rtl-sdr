@@ -35,10 +35,23 @@
       </div>
       <div class="hero-tools">
         {% include "partials/nav.html" %}
+        {% include "partials/status.html" %}
       </div>
     </header>
 
     <main id="main">
+      {# The live comparison leads. The page's question is "what did I just
+         miss", and the polar plot is history: it used to sit above this
+         panel, pushing the missed count 900px past the fold. #}
+      <section class="glass panel" aria-label="Coverage">
+        <h2>Coverage</h2>
+        <div id="coverage" hx-get="/partials/coverage"
+             hx-trigger="every 10s [document.visibilityState === 'visible' && !(document.activeElement && document.activeElement.closest('#coverage'))]">
+          {% include "partials/coverage.html" %}
+        </div>
+        <p id="coverage-live" class="sr-only" aria-live="polite"></p>
+      </section>
+
       <section class="glass panel" aria-label="Receiver coverage">
         <h2>Receiver coverage</h2>
         {% if polar.points.is_empty() %}
@@ -58,6 +71,15 @@
                   x2="{{ polar.center }}" y2="{{ polar.edge() }}"></line>
             <line class="polar-spoke" x1="{{ polar.center }}" y1="{{ polar.center }}"
                   x2="30" y2="{{ polar.center }}"></line>
+            {# Compass first: without it the polygon has no orientation, and the
+               ring numbers are the only clue to how far a sector reaches. #}
+            <text class="polar-compass" x="{{ polar.center }}" y="{{ polar.center - polar.radius - 6.0 }}" text-anchor="middle">N</text>
+            <text class="polar-compass" x="{{ polar.center }}" y="{{ polar.center + polar.radius + 14.0 }}" text-anchor="middle">S</text>
+            <text class="polar-compass" x="{{ polar.center + polar.radius + 12.0 }}" y="{{ polar.center }}" text-anchor="middle" dominant-baseline="middle">E</text>
+            <text class="polar-compass" x="{{ polar.center - polar.radius - 12.0 }}" y="{{ polar.center }}" text-anchor="middle" dominant-baseline="middle">W</text>
+            {% for ring in polar.rings %}
+            <text class="polar-label" x="{{ polar.center }}" y="{{ polar.center - ring.r + 11.0 }}" text-anchor="middle">{{ ring.range_nm }}</text>
+            {% endfor %}
             <path class="polar-area" d="{{ polar.path }}"></path>
             <path class="polar-recent" d="{{ polar.recent_path }}"></path>
             {% for p in polar.points %}
@@ -85,20 +107,12 @@
         </details>
         {% endif %}
       </section>
-
-      <section class="glass panel" aria-label="Coverage">
-        <h2>Coverage</h2>
-        <div id="coverage" hx-get="/partials/coverage"
-             hx-trigger="every 10s [document.visibilityState === 'visible' && !(document.activeElement && document.activeElement.closest('#coverage'))]">
-          {% include "partials/coverage.html" %}
-        </div>
-        <p id="coverage-live" class="sr-only" aria-live="polite"></p>
-      </section>
     </main>
 
     <footer>LOCAL LEDGER · SQLITE · NO CLOUD</footer>
   </div>
 
+  {% include "partials/net-note.html" %}
   <script>
     // Announce the poll status after each swap without making the whole table
     // a live region. The refresh pauses while focus is inside #coverage, so a

@@ -243,7 +243,9 @@ tracking and case, not from a second family.
 ### Named Rules
 **The Tabular Rule.** Every number that can change — card numerals, table cells,
 histogram axes, chart labels — sets `font-variant-numeric: tabular-nums`. A value that
-shifts the layout when it ticks is a bug.
+shifts the layout when it ticks is a bug. Values of four digits or more carry thousands
+separators, from one formatter (`stats::thousands`); `47000 ft` next to `10,015 aircraft`
+in one viewport is the same bug as a shifting column.
 
 **The One Voice Rule.** No second sans family. If a form control does not inherit the
 stack, fix the control; do not add a font.
@@ -289,7 +291,10 @@ desktop and still fits a phone without a second layout.
   cards changes the rows, never the column width. Container queries drop it to 2 columns
   below 30rem and 1 below 10rem. Cards are grouped under `.group-label` eyebrows
   (*Right now* / *Ledger* / *Records*) with a hairline rule running to the right edge, so
-  thirteen tiles read as three ideas.
+  thirteen tiles read as three ideas. Two groups are their own row and take a modifier:
+  `.cards.five` (five across at ≥1000px, for `/today` and `/coverage`) and `.cards.pair`
+  (two cards capped at 22rem, for `/records`' long tail), so an odd count never leaves a
+  lone card under three empty cells.
 - **Tables** live in a `.table-wrap` with `overflow-x: auto` and a 10px radius; the page
   never scrolls horizontally, the table does. A `local`/`scroll` background pair draws a
   14px vignette at each edge — sized to the cell padding, so it never reaches the content.
@@ -300,7 +305,9 @@ desktop and still fits a phone without a second layout.
 - **Coverage** is one panel: a status line, five stat cards, then two tables. The
   local-vs-network set is a 60 s rolling comparison; stale network data is labelled, not
   hidden. An empty state is a sibling of `.table-wrap`, never a row inside it, so a
-  one-line message never needs horizontal scroll.
+  one-line message never needs horizontal scroll. It is the page's **first** panel: the
+  question is "what did I just miss", and the polar plot of history — with compass and
+  ring distances — comes second.
 - **`/today`** carries a fifth "network saw" card in the At a glance group, with coverage
   percentage and only-you / only-network counts. It shows `-` and "network data
   unavailable" when the poller has no current network sample.
@@ -318,10 +325,23 @@ desktop and still fits a phone without a second layout.
 - **The fleet table pins its hex column** (`position: sticky; left: 0`) so the row keeps
   its identity while the remaining twelve columns scroll under it on a phone.
 - **A table that can grow without bound is capped** with `scrollbar-gutter: stable` and a
-  sticky header. Two cases, one pattern: the live panel at `40vh` (a changing row count
-  must not push the rest of the page) and the `/today` "New today" tail at `60vh` (a busy
-  day adds hundreds of first sightings; uncapped, 154 rows made a 5,940px digest). Every
-  row stays reachable by scrolling — nothing is hidden behind a link that does not exist.
+  sticky header. Two cases, one pattern: the live panel and the `/today` "New today" tail
+  at `60vh` (a busy day adds hundreds of first sightings; uncapped, 154 rows made a
+  5,940px digest). Every row stays reachable by scrolling — nothing is hidden behind a
+  link that does not exist.
+- **The live panel reserves space, the well does not draw it.** `.live-reserve` holds
+  `min-height: 16.75rem` (header + 7 rows, the usual peak over this receiver) so a
+  changing aircraft count never pushes the summary down — iOS Safari has no scroll
+  anchoring, and a content-sized panel turned every 5 s tick into a page jump. The
+  `.table-wrap` itself is `max-height` only, so a 3-aircraft sky shows three rows on
+  glass instead of 139px of empty bordered well.
+- **Below 640px a wide table keeps the columns that answer its panel.** `/today`'s
+  records drop Previous best and Aircraft to leave Metric · Today · Status; `/countries`
+  drops Types, Best range and Last heard and shrinks the sticky country cell to flag +
+  code; `/type`'s airframes keep Hex · Registration · Last seen · Polls. The dropped
+  columns are marked `.col-secondary` in the template. Without this the answering column
+  (Status at x=457, Share behind a 183px country column) sat off a 325px well with no
+  cue — and the edge vignette is deliberately not a cue.
 - **The fleet filter label column** is `min-width: 7.4rem`, not the `6.4rem` it started
   at: "Max altitude" measures 108px and wrapped at the old basis, which made that one row
   taller than the others. `flex: 0 0 auto` with a `min-width` keeps every label on one
@@ -409,7 +429,9 @@ Both copies are in the markup and each breakpoint hides the other with
 only adds Escape-dismissal and a tap-outside close. The header sits above the
 panels (`z-index: 20`) so the sheet can overhang them.
 
-The poller status pill keeps its place in the header on a phone. Below 860px its label
+The poller status pill is in the header of **every** page, not only the dashboard: a
+digest or an activity page that cannot say whether the receiver is alive presents a day
+that ended at 09:00 as current. It keeps its place on a phone. Below 860px its label
 drops to the state word (`live` / `stalled` / `down`) — the dot carries the colour and
 the `title` keeps the age; the menu button is never allowed to wrap onto a second row.
 
@@ -440,6 +462,25 @@ on hover, and the active one turns Sky Blue with a ▾/▴ glyph. Rows: 0.84rem 
 Text, 4.5% white bottom border, hover background 3.5% white. The first column is mono at
 0.78rem in Sky Blue Dim — the hex code is the row's identity.
 
+### Record book (/records)
+A record is a value, a holder and a moment, so the page opens with one table, not a wall
+of top-10 lists. Each row's header is the record name (Label type, so it reads as a
+label), the value is the page's one strong numeral (0.95rem/600, tabular, unit in
+`.unit`), the holder links to the aircraft profile (or the type page for Rarest type),
+and the Detail cell wraps a sentence: the median the record beats, the age, the registry
+population it came from, then `since 14 Nov`. A record set within 7 days carries a
+`.rec-fresh` **new** tag in Signal Mint — the system's broken-record hue — on the record
+name, so it survives the mobile column drop. The day comes from `day_aircraft` (the
+daily ledger has no backfill, so a pre-ledger record simply has no date), except the
+longest visit, which dates itself, and the rarest type, which takes its first catch.
+Detail is `.col-secondary`; record, value and holder are the phone's columns.
+
+Below it: **The rare** (rarest types ranked by caught/registered, rendered as
+`1 in 11,655`; oldest airframes with their age), **The regulars** (longest visits and
+busiest callsigns), and **The long tail** (two `.cards.pair` tiles — heard once vs heard
+again — then the most recent one-pass airframes). Four panels with four jobs, rather
+than six tables with none.
+
 ### Coverage comparison (/coverage)
 One panel answers "what did I hear that the network did not, and vice versa?" A status
 line (`network poll 7s ago` in Muted Slate, stale in Emergency Amber) sits above five
@@ -454,7 +495,8 @@ announces only live/stale transitions through a polite live region.
 card shows `-` and names the last good poll; local counts stay live.
 
 **The Focus-Safe Refresh Rule.** An auto-refreshing region pauses while focus is inside
-it, and status changes are announced through a polite live region rather than by
+it — `#coverage`, `#live` and `#cards` all carry the `closest('#…')` guard on their
+`hx-trigger`, and status changes are announced through a polite live region rather than by
 replacing the focused content.
 
 ### Feeder status (dashboard)
@@ -468,7 +510,10 @@ media query. The card ends with the shared `.type-credit` network line.
 A photo-led card grid (`repeat(auto-fill, minmax(220px, 1fr))`, 14px radius, 16:10 photo,
 0.9rem name, 0.72rem mono designator, 4px progress bar). It is the one place a card lifts
 on hover (`translateY(-2px)`), because the whole card is a link; every other surface
-follows the No-Lift Rule.
+follows the No-Lift Rule. Cards carry the card material (gradient, hairline, inset
+highlight), **not `.glass`**: 141 nested `backdrop-filter` rasters inside an already
+blurred panel is the cost the `.card` rule documents, invisibly. Below 640px the grid is
+two columns, not one — a single column put the sort row 40 screens above the finger.
 
 ### Network credit
 `.type-credit` is the shared provenance line: 0.75rem Faint Slate, link in Sky Blue,
@@ -477,11 +522,21 @@ the aircraft profile.
 
 ### Inputs
 Search field: full width, 10px radius, glass gradient, 0.85rem, placeholder in Muted
-Slate, focus border in Sky Blue Dim (no ring, no glow). Known defect: the search field
-does not inherit the system sans and computes to Arial; fix the control, not the stack.
-Altitude fields: 8px radius, 5.2rem wide, right-sized numerals. Both take a 2px Sky Blue
-Dim halo on focus (`box-shadow`), because a 1px border shift alone is not a focus
-indicator.
+Slate, focus border in Sky Blue Dim. Every control (`input`, `select`, `textarea`,
+`button`) takes `font-family: inherit`; left to the UA, the search field computed to
+Arial 13.6px and the country select and altitude fields to Arial 11.52px, which is a
+second sans family.
+Altitude fields: 8px radius, 5.2rem wide, right-sized numerals. Search, altitude and the
+country select all take a 2px Sky Blue Dim halo on focus (`box-shadow`), because a 1px
+border shift alone is not a focus indicator. On a phone all three take a 16px floor —
+iOS zooms the viewport on a smaller focused control and never zooms back.
+
+### Key/value tables
+`.kv` marks a table whose rows are one fact each (the aircraft profile's Identity,
+Records, Last observed and Schedule, the type page's catches). The label column is
+`width: 1px` + `nowrap` so it hugs its text, and values wrap. Without it the type page's
+label column grew to 752px and put each value 600px from its label; with the global
+`nowrap` on `td` the same tables also forced horizontal scroll at desktop width.
 
 ### Sortable headers
 A sortable `<th>` contains a real `<button class="sort">`, not a bare `hx-get` on the
@@ -526,7 +581,10 @@ failed render. All of them are a page in the same shell as every other page — 
 default is a bare `404 Not Found` in plain text, which is the one thing this app does not
 have. A 404 carries the Display title `Not in the ledger`, a Muted Slate tagline naming
 the problem, and one panel whose eyebrow is `What happened` over a single `.empty-note`
-sentence: what happened, then the way back. A 500 keeps the shell and swaps the title for
+sentence: what happened, then the way back — `Back to the dashboard` and `Open the fleet`
+are real links, not prose telling you to use the nav. The tagline is exempt from the
+720px rule that hides taglines (`.tagline.error-message`): on a phone it is the only
+statement of what went wrong. A 500 keeps the shell and swaps the title for
 `Something broke` and the sentence for the recovery (`docker logs plane-stats`). No
 illustration, no apology, no second accent. `/api/*` answers JSON instead, so a client
 never has to parse a page.
@@ -543,13 +601,22 @@ exactly like a receiver that had gone quiet: every panel froze on its last good 
 no explanation. The notice names the failure and the state of the data (`These panels are
 showing their last good data.`), carries the same amber hairline as the poller pill, and
 clears on the next successful request. It is `role="status"`, so it is announced rather
-than only seen.
+than only seen. The markup is `partials/net-note.html` and the listeners live in
+`app.js`, so every htmx surface gets it — `/coverage` auto-refreshes too and used to
+freeze silently while only the dashboard had the notice.
 
 ### Empty states
 An empty table body is a state, not a blank. `.empty-row` gives it room, the Muted Slate
 voice, and the one action that leaves it: a filtered fleet offers `Clear them`, an empty
 ledger says when the first row lands, an empty emergency log names the squawks that would
-fill it. The live panel is the exception that proves the rule — an empty list means "clear
+fill it. It also sets `white-space: normal`: the global `nowrap` on `th, td` made the
+fleet's one-sentence empty state 1,461px wide inside a 325px well on a phone, and the
+reader saw "No aircraft match these filters. Clear them to see" cut mid-word. A table
+whose body holds only that row hides its header (`.table-wrap:has(tbody td.empty-row)`)
+so the sentence owns the well instead of inheriting ten columns; the fleet's state is a
+sibling `<p>` toggled by `#fleet:not(:has(#fleet-rows tr))`, so the 60 s `<tbody>` swap
+fills and empties it without a reload.
+The live panel is the exception that proves the rule — an empty list means "clear
 skies" only while polls are landing, so with the poller stalled or down the same cell
 carries `PollerHealth::sentence()` in Emergency Amber instead. An empty panel must never
 let a dead receiver read as a quiet sky.
@@ -577,6 +644,15 @@ against the grid; left-aligned, the `0.3rem` gutter fell *after* the text and th
 floated in a 38px column. Line charts are inline SVG in a fixed 640×120 viewBox: 7% white
 gridlines, a 12% Sky Blue area fill, a 1.6px Sky Blue line with round joins, and 3px dots
 that turn Signal Mint on hover. All strokes use `vector-effect: non-scaling-stroke`.
+`/activity`'s "Aircraft ever heard" plots the running total of first sightings, not the
+per-day count: an airframe can be new once, so the daily cohort decays toward zero by
+construction and reads as a broken series. The running total is pinned to a 0 baseline
+(`build_bounded` takes either bound) so the growth is honest, and the note carries the
+week's additions.
+The `/coverage` polar plot carries its own scale: N/E/S/W at the cardinal spokes and the
+range in nautical miles inside each ring on the north axis. A bearing-sector polygon with
+no compass and no ring values cannot be read — the first version had zero `<text>`
+elements and asked the reader to count rings from the centre.
 
 Every chart ships two paths to the same numbers, because neither one covers touch,
 keyboard and screen reader alone:
@@ -588,7 +664,14 @@ keyboard and screen reader alone:
 - **A `<details class="chart-table">` holds the data as a real table** with
   `<caption>` and `scope` headers. It is the screen reader's path, the touch
   user's fallback when a cell is 10px wide, and the only way to read an exact
-  value rather than a shade of blue.
+  value rather than a shade of blue. Every chart has one, including `/today`'s
+  histogram — the one chart that shipped without its twin.
+
+A chart's unit belongs to its title (`Best range by day (nm)`), never to the axis
+row: centered between the first and last date it reads as a tick label, which is
+how `/activity` shipped five charts whose y numbers had no unit at all. And a
+series with one point is not a chart: with a single day of network data the panel
+shows the dated note and the table, never a lone dot floating mid-grid.
 
 The heatmap is an ARIA `grid`: `role="row"` wrappers use `display: contents` so
 the 25-column CSS grid is untouched, and each cell carries the full slot in its
@@ -647,6 +730,9 @@ One noun per concept, everywhere. These are the words; anything else is a bug.
 - **Do** build every surface from the 160° glass gradient and the 1px Hairline Stroke; a
   flat fill is only for the Table Well and the selected chip.
 - **Do** set `font-variant-numeric: tabular-nums` on every changing value.
+- **Do** print a quantity to one precision everywhere: range is one decimal
+  (`19.3 nm`, never `19.259` beside `19.3`), and a share that is real but under a tenth
+  reads `<0.1%` rather than `0.0%`.
 - **Do** open each panel with a tracked uppercase eyebrow and its 2px accent bar.
 - **Do** use Sky Blue Dim for focus borders and the hex column, full Sky Blue for links
   and active state.

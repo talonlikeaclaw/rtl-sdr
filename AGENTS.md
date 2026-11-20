@@ -154,6 +154,20 @@ docker compose --profile adsb build plane-stats
   field (`"dashboard"`, `"today"`, …) selecting the `aria-current="page"`
   link; page-specific actions go under the tagline in `.page-actions`, never
   into the section nav.
+- **Receiver status** is `templates/partials/status.html`, included after the
+  nav in every content page's `hero-tools`. Every page template therefore
+  carries a `poller: stats::PollerHealth` field, filled from
+  `stats::last_poll_age`. The error page has no `Db` in its fallback, so it and
+  the JSON APIs are the only surfaces without the pill.
+- **Key/value tables** (profile Identity/Records/Last observed/Schedule, the
+  type page's catches) carry `.kv`, and their row headers carry
+  `scope="row"`. `.kv th` is `width: 1px; nowrap` so labels hug their values and
+  `.kv td` wraps; without it `table-layout: auto` gave the type page a 752px
+  label column, and the global `nowrap` on `td` pushed long values into
+  horizontal scroll.
+- **Below 640px a wide table drops its secondary columns** rather than hiding
+  the answer off the right edge: mark them `.col-secondary` (used on `/today`
+  records, `/countries` and `/type` airframes).
 - **Favicon:** `static/favicon.svg` is the aircraft mark on a night-ground
   tile and is the source; `static/favicon-32.png` is rasterized from it
   (`ffmpeg -i favicon.svg -vf scale=32:32 favicon-32.png`). `web.rs` serves
@@ -170,7 +184,9 @@ docker compose --profile adsb build plane-stats
 
 ## plane-stats status
 
-Built: aircraft profile page (visits, callsigns, records), OpenSky
+Built: aircraft profile page (live latest-state cards — altitude/speed/range/
+polls from the `last_*` columns with an `Overhead now` or `Last heard` stamp;
+visits, callsigns, records), OpenSky
 registration/type enrichment, emergency squawk log, tar1090 map/trace deep
 links, live "overhead now" panel (current alt/speed/climb/range/bearing/age from
 the `last_*` columns; `/partials/live` + `/api/live`, 5 s htmx refresh; bearing
@@ -257,10 +273,11 @@ Activity (`/activity`, `/api/activity`):
   inlines the path/area/dots.
 - The heatmap is a CSS grid with `minmax(0, 1fr)` columns and
   `overflow: hidden`, so it never adds horizontal scroll on mobile.
-- The `/today` histogram tooltip (`#hist-tip`) is a direct child of `<body>`,
-  not of the panel: `.glass` uses `backdrop-filter`, which makes it the
-  containing block for `position: fixed` descendants, so a tooltip inside the
-  panel would be offset and stacked under later panels.
+- The chart tooltip (`#chart-tip`, shared by the `/today` histogram and the
+  `/activity` heatmap) is a direct child of `<body>`, not of the panel: `.glass`
+  uses `backdrop-filter`, which makes it the containing block for
+  `position: fixed` descendants, so a tooltip inside the panel would be offset
+  and stacked under later panels.
 
 Type dex (`/types`, `/type/:code`, `/api/types`, `/api/type/:code`):
 
@@ -316,14 +333,18 @@ Refresh model (do not "simplify" back to a whole-table tick):
   user request.
 - Filter state travels in request bodies (`hx-include="#fleet-controls"`), not
   in generated `filter_suffix` query strings.
-- The live panel has a **fixed** height of `16.25rem` on `.live-wrap`
-  (header + 7 rows, the usual peak; the 8th scrolls) and server-renders
-  `live_aircraft()` via the `live` template field — the include must never
-  resolve to `rows` (the fleet page), or the first tick collapses the panel.
-  Do not go back to `max-height`: the panel refreshes every 5 s and its row
-  count changes, so a content-sized panel shifted every panel below it on each
-  tick (iOS Safari has no scroll anchoring, so the page jumped while reading
-  the fleet).
+- The live panel **reserves** `16.75rem` on `.live-reserve` (header + 7 rows, the
+  usual peak; the 8th scrolls) and server-renders `live_aircraft()` via the `live`
+  template field — the include must never resolve to `rows` (the fleet page), or
+  the first tick collapses the panel. Do not go back to `height` on
+  `.live-wrap`: the panel refreshes every 5 s and its row count changes, so a
+  content-sized panel shifted every panel below it on each tick (iOS Safari has
+  no scroll anchoring, so the page jumped while reading the fleet). The reserve
+  holds the space; the well is `max-height` only, so a 3-aircraft sky draws three
+  rows on glass instead of 139px of empty bordered box.
+- `#live` and `#cards` carry the same `closest('#…')` focus guard as `#coverage`
+  on their `hx-trigger`: without it a 5 s tick replaced the focused row link and
+  dropped the keyboard user on `<body>`.
 - `stats()` is cached for 10 s (`stats_cached`) because it is 16 all-time
   aggregates; `/api/stats` stays uncached.
 - `poll_hour` is the hourly `MAX(aircraft_count)` rollup the cards read instead
@@ -352,11 +373,25 @@ Country, polar coverage, records, schedule and routes (steps 9-14):
   `/globe_history`): 16-byte records of hex, lat/lon ×1e6, alt/gs; callsign
   metadata blocks and ground (`alt=-123`) are skipped. Stamp
   `range_sector_backfill_v1` in `enrichment_meta`; it never writes to tar1090.
-- `/activity` adds unique-by-day (`day_aircraft`), new-by-day (`aircraft` full
-  history) and network coverage % per day. Coverage is `null` when that day had
-  no local polls, never 0%; the chart uses `LineChart::build_bounded(0, 100)`.
-- `/records` and `/api/records` reuse `type_dex`, `records_by`, `visits`, and
-  the enrichment year; no new tables.
+- `/activity` adds unique-by-day (`day_aircraft`), ledger growth (`aircraft`
+  first sightings as a running total) and network coverage % per day. The
+  growth series replaced a per-day "new aircraft" line: an aircraft can be new
+  once, so that cohort decays toward zero by construction and read as a broken
+  chart. Coverage is `null` when that day had no local polls, never 0%; the
+  chart uses `LineChart::build_bounded(0, 100)`. `build_bounded` accepts one
+  bound, so growth is pinned to 0 and the running total never floats.
+- `/records` and `/api/records` reuse `type_dex`, `records_by`, `visits`, the
+  daily ledger and the enrichment year; no new tables. The page is a record
+  book: one row per all-time best with its holder and the day it was set
+  (`first_record_day` reads the day ledger). Detail text supplies the context
+  the bare number lacks (median catch/visit, age, registry population), and a
+  record set within 7 days is marked in Signal Mint. `one_hit_share` and
+  `repeat_visits_avg` drive the long-tail cards; `rarest_types` ranks by
+  caught/registered and renders "1 in 11,655", not a percentage that printed
+  `<0.1%` on every row. `top_callsigns` sorts by sightings, not airframes, and
+  drops rows whose "callsign" is the aircraft's own registration (tar1090's
+  `flight` field sometimes carries the tail number, which topped the list as
+  the local regular and hid the airline flight numbers).
 - The aircraft profile has a 24-hour visit-start schedule, day streak (grace for
   a streak ending yesterday), and an adsbdb `origin → destination` row.
 - `src/routes.rs` is memory-only by design: adsbdb's terms forbid persisting or

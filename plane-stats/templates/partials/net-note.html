@@ -1,0 +1,7 @@
+{# htmx leaves a failed swap in place and says nothing, so a 500 or a dropped
+   connection looked exactly like a receiver that had gone quiet: every panel
+   froze on its last good data with no explanation. One notice, cleared by the
+   next successful request. Direct child of <body>: `.glass` uses
+   backdrop-filter, which makes a panel the containing block for fixed
+   descendants. The listeners live in app.js so every htmx surface has them. #}
+<div id="net-note" class="net-note" role="status"></div>

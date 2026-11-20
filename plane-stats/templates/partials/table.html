@@ -7,6 +7,17 @@
   <a class="clear-all" href="/">Clear all</a>
 </div>
 {% endif %}
+{# The empty state is a sibling of the well: inside the table it inherited the
+   table's 1,575px width and the reader saw the first 45 characters of a
+   sentence. It is always in the DOM and toggled by `:has()` on the body, so
+   the 60 s `#fleet-rows` swap both fills and empties it without a reload. #}
+<p class="empty-row fleet-empty">
+  {% if filtered %}
+  No aircraft match these filters. <a href="/">Clear them</a> to see the whole fleet.
+  {% else %}
+  No aircraft recorded yet. The poller writes a row within 10&nbsp;s of the first aircraft it hears.
+  {% endif %}
+</p>
 <div class="table-wrap">
 <table hx-disinherit="hx-include">
   <caption class="sr-only">Every aircraft heard, with first and last sighting and records</caption>

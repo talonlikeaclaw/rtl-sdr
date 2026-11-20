@@ -130,8 +130,19 @@ impl AircraftRow {
     pub fn nav_hdg_str(&self) -> String {
         self.last_nav_heading.map(|t| format!("{t:.0}\u{00b0}")).unwrap_or_else(|| "-".into())
     }
-    pub fn emergency_str(&self) -> String {
-        self.last_emergency.as_deref().unwrap_or("-").to_string()
+    /// `last_emergency` arrives as the literal `none` when nothing is wrong, so
+    /// the profile's Emergency row printed the word. Missing-value convention
+    /// is `-`; a real squawk keeps its word.
+    pub fn emergency_value(&self) -> String {
+        match self.last_emergency.as_deref() {
+            None | Some("") | Some("none") => "-".into(),
+            Some(e) => e.to_string(),
+        }
+    }
+    /// One decimal, like every other range readout. The fleet column printed
+    /// the raw float (`19.259`) while the profile and /countries printed `19.3`.
+    pub fn max_range_str(&self) -> String {
+        self.max_range_nm.map(|v| format!("{v:.1}")).unwrap_or_else(|| "-".into())
     }
     pub fn emergency_active(&self) -> bool {
         matches!(self.last_emergency.as_deref(), Some(e) if e != "none")
@@ -434,13 +445,8 @@ impl VisitRecord {
     pub fn start_str(&self) -> String {
         Self::fmt_ts(self.start_ts)
     }
-    pub fn end_str(&self) -> String {
-        Self::fmt_ts(self.end_ts)
-    }
     pub fn duration_str(&self) -> String {
-        let total_min = (self.duration_secs / 60.0).round() as i64;
-        let (h, m) = (total_min / 60, total_min % 60);
-        if h > 0 { format!("{h}h {m}m") } else { format!("{m}m") }
+        fmt_duration(self.duration_secs)
     }
     pub fn type_url(&self) -> Option<String> {
         self.typecode
@@ -459,6 +465,9 @@ pub struct YearRecord {
     pub registration: Option<String>,
     pub typecode: Option<String>,
     pub year: i64,
+    /// Whole years since the build year; renders beside the year so "1964"
+    /// reads as "62 years old" without the reader doing the subtraction.
+    pub age: i64,
 }
 
 impl YearRecord {
@@ -489,25 +498,171 @@ pub struct RarestType {
     pub name: String,
     pub caught: i64,
     pub registered: i64,
-    pub pct: Option<f64>,
+    pub first_seen: Option<f64>,
 }
 
 impl RarestType {
-    pub fn pct_str(&self) -> String {
-        self.pct.map(|p| format!("{p:.1}%")).unwrap_or_else(|| "-".into())
+    /// The registry is ~11,655 airframes for a type we caught once. A
+    /// percentage printed `<0.1%` on every row and said nothing; "1 in 11,655"
+    /// is the rarity itself.
+    pub fn odds_str(&self) -> String {
+        match self.registered {
+            0 => "-".into(),
+            1 => format!("{}-of-a-kind", self.caught),
+            n => format!("{} in {}", self.caught, thousands(n)),
+        }
     }
 }
 
+/// One line of the `/records` record book: the holder, the value and the
+/// moment the record was set. A leaderboard alone is a column of numbers; a
+/// record needs a name and a date to be a record.
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct RecordLine {
+    pub label: &'static str,
+    pub value: String,
+    pub unit: &'static str,
+    pub holder: String,
+    pub url: String,
+    pub typecode: Option<String>,
+    pub type_url: Option<String>,
+    /// Comparison that gives the number meaning: the median it beats, the
+    /// age it implies, the population it came from.
+    pub note: String,
+    pub since: Option<String>,
+    /// Set within the last week, so the page can mark it in Signal Mint.
+    pub fresh: bool,
+}
+
+/// A headline record is new for a week; after that the `since` date carries
+/// the recency.
+const RECORD_FRESH_DAYS: i64 = 7;
+
 #[derive(Debug, Default, serde::Serialize)]
 pub struct Records {
+    pub fleet: i64,
+    pub visits_total: i64,
     pub one_hit_count: i64,
     pub one_hits: Vec<RarityRow>,
+    pub headline: Vec<RecordLine>,
     pub longest_visits: Vec<VisitRecord>,
-    pub steepest_climbs: Vec<Record>,
-    pub steepest_descents: Vec<Record>,
     pub oldest: Vec<YearRecord>,
     pub rarest_types: Vec<RarestType>,
     pub top_callsigns: Vec<CallsignRecord>,
+}
+
+impl Records {
+    /// The one-hit list is a 20-row sample of a count that can be in the
+    /// hundreds. Say so: "465 one-hit wonders" above 20 rows read as the page
+    /// silently dropping 445 aircraft.
+    pub fn one_hits_truncated(&self) -> bool {
+        self.one_hit_count > self.one_hits.len() as i64
+    }
+    pub fn repeat_count(&self) -> i64 {
+        self.fleet - self.one_hit_count
+    }
+    pub fn fleet_str(&self) -> String {
+        thousands(self.fleet)
+    }
+    pub fn repeat_count_str(&self) -> String {
+        thousands(self.repeat_count())
+    }
+    pub fn one_hit_count_str(&self) -> String {
+        thousands(self.one_hit_count)
+    }
+    pub fn one_hit_share_str(&self) -> String {
+        if self.fleet == 0 {
+            return "-".into();
+        }
+        format!("{:.0}%", self.one_hit_count as f64 * 100.0 / self.fleet as f64)
+    }
+    /// Visits per airframe among those heard more than once. One-hit aircraft
+    /// contribute exactly one visit, so subtract them first.
+    pub fn repeat_visits_avg_str(&self) -> String {
+        let repeat = self.repeat_count();
+        if repeat <= 0 {
+            return "-".into();
+        }
+        let visits = (self.visits_total - self.one_hit_count) as f64 / repeat as f64;
+        format!("{visits:.1}")
+    }
+    pub fn fresh_count(&self) -> usize {
+        self.headline.iter().filter(|r| r.fresh).count()
+    }
+}
+
+/// `14 Nov` for the current year, `14 Nov 2025` otherwise. A record book is
+/// read as history, not as an audit log, so the time of day is noise.
+fn record_day(iso_day: &str) -> String {
+    match chrono::NaiveDate::parse_from_str(iso_day, "%Y-%m-%d") {
+        Ok(d) if d.format("%Y").to_string() == chrono::Local::now().format("%Y").to_string() => {
+            d.format("%-d %b").to_string()
+        }
+        Ok(d) => d.format("%-d %b %Y").to_string(),
+        Err(_) => iso_day.to_string(),
+    }
+}
+
+fn fmt_duration(secs: f64) -> String {
+    let total_min = (secs / 60.0).round() as i64;
+    let (h, m) = (total_min / 60, total_min % 60);
+    if h > 0 {
+        format!("{h}h {m}m")
+    } else {
+        format!("{m}m")
+    }
+}
+
+/// The first local day whose daily maximum reached the all-time record.
+/// `None` when the record predates the daily ledger (it has no backfill).
+fn first_record_day(conn: &Connection, col: &str, value: f64) -> rusqlite::Result<Option<String>> {
+    conn.query_row(
+        &format!("SELECT MIN(day) FROM day_aircraft WHERE {col} >= ?1"),
+        params![value],
+        |r| r.get(0),
+    )
+}
+
+/// Median of one numeric column across a table. `count_sql` and `value_sql`
+/// are fixed strings, never user input.
+fn median_value(conn: &Connection, count_sql: &str, value_sql: &str) -> rusqlite::Result<Option<f64>> {
+    let n: i64 = conn.query_row(count_sql, [], |r| r.get(0))?;
+    if n == 0 {
+        return Ok(None);
+    }
+    conn.query_row(value_sql, params![n / 2], |r| r.get(0)).optional()
+}
+
+#[allow(clippy::too_many_arguments)]
+fn record_line(
+    label: &'static str,
+    value: String,
+    unit: &'static str,
+    holder: String,
+    url: String,
+    typecode: Option<String>,
+    note: String,
+    since_iso: Option<String>,
+    now: f64,
+) -> RecordLine {
+    let cutoff = local_day(now - RECORD_FRESH_DAYS as f64 * 86_400.0);
+    let fresh = since_iso.as_deref().is_some_and(|d| d >= cutoff.as_str());
+    let type_url = typecode
+        .as_deref()
+        .filter(|t| valid_designator(t))
+        .map(|t| format!("/type/{t}"));
+    RecordLine {
+        label,
+        value,
+        unit,
+        holder,
+        url,
+        typecode,
+        type_url,
+        note,
+        since: since_iso.as_deref().map(record_day),
+        fresh,
+    }
 }
 
 pub fn records(db: &Db) -> rusqlite::Result<Records> {
@@ -515,6 +670,9 @@ pub fn records(db: &Db) -> rusqlite::Result<Records> {
     // the shared connection mutex is not reentrant.
     let dex = type_dex(db)?;
     let conn = crate::db_lock(db);
+    let now = chrono::Local::now().timestamp() as f64;
+    let fleet: i64 = conn.query_row("SELECT COUNT(*) FROM aircraft", [], |r| r.get(0))?;
+    let visits_total: i64 = conn.query_row("SELECT COUNT(*) FROM visits", [], |r| r.get(0))?;
     let one_hit_count: i64 = conn.query_row(
         "SELECT COUNT(*) FROM aircraft a
          WHERE (SELECT COUNT(*) FROM visits v WHERE v.hex = a.hex) = 1",
@@ -530,7 +688,7 @@ pub fn records(db: &Db) -> rusqlite::Result<Records> {
              LEFT JOIN enrichment e ON e.icao24 = a.hex
              LEFT JOIN network_enrichment n ON n.hex = a.hex
              WHERE (SELECT COUNT(*) FROM visits v WHERE v.hex = a.hex) = 1
-             ORDER BY a.last_seen DESC LIMIT 20",
+             ORDER BY a.last_seen DESC LIMIT 10",
         )?;
         let rows = stmt
             .query_map([], |r| {
@@ -555,7 +713,7 @@ pub fn records(db: &Db) -> rusqlite::Result<Records> {
              FROM visits v
              LEFT JOIN enrichment e ON e.icao24 = v.hex
              LEFT JOIN network_enrichment n ON n.hex = v.hex
-             ORDER BY dur DESC LIMIT 10",
+             ORDER BY dur DESC LIMIT 5",
         )?;
         let rows = stmt
             .query_map([], |r| {
@@ -586,11 +744,13 @@ pub fn records(db: &Db) -> rusqlite::Result<Records> {
         )?;
         let rows = stmt
             .query_map(params![current_year], |r| {
+                let year: i64 = r.get(3)?;
                 Ok(YearRecord {
                     hex: r.get(0)?,
                     registration: r.get(1)?,
                     typecode: r.get(2)?,
-                    year: r.get(3)?,
+                    year,
+                    age: (current_year - year).max(0),
                 })
             })?
             .collect::<rusqlite::Result<Vec<_>>>()?;
@@ -604,7 +764,7 @@ pub fn records(db: &Db) -> rusqlite::Result<Records> {
             name: t.display_name(),
             caught: t.caught,
             registered: t.registered,
-            pct: (t.registered > 0).then(|| t.caught as f64 * 100.0 / t.registered as f64),
+            first_seen: t.first_seen,
         })
         .collect();
     rarest_types.sort_by(|a, b| {
@@ -618,10 +778,19 @@ pub fn records(db: &Db) -> rusqlite::Result<Records> {
     });
     rarest_types.truncate(10);
     let top_callsigns = {
+        // tar1090's `flight` is sometimes the registration itself ("CFCY" for
+        // C-FDCY). Those rows would top a sightings ranking as the local
+        // regular and hide the airline flight numbers the table is for, so a
+        // callsign equal to the aircraft's registration is not a callsign.
         let mut stmt = conn.prepare(
-            "SELECT callsign, COUNT(DISTINCT hex), SUM(sightings)
-             FROM aircraft_callsigns GROUP BY callsign
-             ORDER BY 2 DESC, 3 DESC LIMIT 10",
+            "SELECT ac.callsign, COUNT(DISTINCT ac.hex), SUM(ac.sightings)
+             FROM aircraft_callsigns ac
+             LEFT JOIN enrichment e ON e.icao24 = ac.hex
+             LEFT JOIN network_enrichment n ON n.hex = ac.hex
+             WHERE upper(replace(coalesce(nullif(e.registration,''), n.registration, ''), '-', ''))
+                   <> upper(ac.callsign)
+             GROUP BY ac.callsign
+             ORDER BY 3 DESC, 2 DESC LIMIT 10",
         )?;
         let rows = stmt
             .query_map([], |r| {
@@ -630,12 +799,173 @@ pub fn records(db: &Db) -> rusqlite::Result<Records> {
             .collect::<rusqlite::Result<Vec<_>>>()?;
         rows
     };
+
+    // The record book: one row per all-time best, each with the holder and
+    // the day it was set. A top-10 table says who sits in each seat; this says
+    // what the seat is worth.
+    let median_range = median_value(
+        &conn,
+        "SELECT COUNT(*) FROM aircraft WHERE max_range_nm IS NOT NULL",
+        "SELECT max_range_nm FROM aircraft WHERE max_range_nm IS NOT NULL
+         ORDER BY 1 LIMIT 1 OFFSET ?1",
+    )?;
+    let median_visit = median_value(
+        &conn,
+        "SELECT COUNT(*) FROM visits",
+        "SELECT end_ts - start_ts FROM visits ORDER BY 1 LIMIT 1 OFFSET ?1",
+    )?;
+    let mut headline = Vec::with_capacity(9);
+
+    if let Some(r) = records_by(&conn, "a.max_range_nm", "DESC", 1)?.into_iter().next() {
+        let note = match median_range {
+            Some(m) if m > 0.0 => {
+                format!("{:.1}× the median catch of {} nm", r.value / m, fmt_num(m))
+            }
+            _ => format!("one of {} airframes", thousands(fleet)),
+        };
+        let since = first_record_day(&conn, "max_range_nm", r.value)?;
+        headline.push(record_line(
+            "Farthest catch",
+            fmt_num(r.value),
+            "nm",
+            r.holder(),
+            format!("/aircraft/{}", r.hex),
+            r.typecode.clone(),
+            note,
+            since,
+            now,
+        ));
+    }
+    if let Some(r) = records_by(&conn, "a.max_alt_ft", "DESC", 1)?.into_iter().next() {
+        let since = first_record_day(&conn, "max_alt_ft", r.value)?;
+        headline.push(record_line(
+            "Highest altitude",
+            fmt_num(r.value),
+            "ft",
+            r.holder(),
+            format!("/aircraft/{}", r.hex),
+            r.typecode.clone(),
+            String::new(),
+            since,
+            now,
+        ));
+    }
+    if let Some(r) = records_by(&conn, "a.max_gs_kts", "DESC", 1)?.into_iter().next() {
+        let since = first_record_day(&conn, "max_gs_kts", r.value)?;
+        headline.push(record_line(
+            "Fastest groundspeed",
+            fmt_num(r.value),
+            "kt",
+            r.holder(),
+            format!("/aircraft/{}", r.hex),
+            r.typecode.clone(),
+            String::new(),
+            since,
+            now,
+        ));
+    }
+    if let Some(r) = records_by(&conn, "a.max_baro_rate", "DESC", 1)?.into_iter().next() {
+        headline.push(record_line(
+            "Steepest climb",
+            fmt_num(r.value),
+            "ft/min",
+            r.holder(),
+            format!("/aircraft/{}", r.hex),
+            r.typecode.clone(),
+            String::new(),
+            None,
+            now,
+        ));
+    }
+    if let Some(r) = records_by(&conn, "a.min_baro_rate", "ASC", 1)?.into_iter().next() {
+        headline.push(record_line(
+            "Steepest descent",
+            r.abs_value_str(),
+            "ft/min",
+            r.holder(),
+            format!("/aircraft/{}", r.hex),
+            r.typecode.clone(),
+            String::new(),
+            None,
+            now,
+        ));
+    }
+    if let Some(v) = longest_visits.first() {
+        let note = match median_visit {
+            Some(m) if m > 0.0 => {
+                format!("{:.1}× the median visit of {}", v.duration_secs / m, fmt_duration(m))
+            }
+            _ => String::new(),
+        };
+        let since = chrono::DateTime::from_timestamp(v.end_ts as i64, 0)
+            .map(|dt| dt.with_timezone(&chrono::Local).format("%Y-%m-%d").to_string());
+        headline.push(record_line(
+            "Longest overhead",
+            fmt_duration(v.duration_secs),
+            "",
+            v.ident(),
+            format!("/aircraft/{}", v.hex),
+            v.typecode.clone(),
+            note,
+            since,
+            now,
+        ));
+    }
+    if let Some(r) = records_by(&conn, "a.sightings", "DESC", 1)?.into_iter().next() {
+        let visits: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM visits WHERE hex = ?1",
+            params![r.hex],
+            |row| row.get(0),
+        )?;
+        let note = if visits == 1 { "1 visit".to_string() } else { format!("{} visits", thousands(visits)) };
+        headline.push(record_line(
+            "Most heard",
+            thousands(r.value as i64),
+            "polls",
+            r.holder(),
+            format!("/aircraft/{}", r.hex),
+            r.typecode.clone(),
+            note,
+            None,
+            now,
+        ));
+    }
+    if let Some(o) = oldest.first() {
+        let note = if o.age == 1 { "1 year old".to_string() } else { format!("{} years old", thousands(o.age)) };
+        headline.push(record_line(
+            "Oldest airframe",
+            o.year.to_string(),
+            "",
+            o.ident(),
+            format!("/aircraft/{}", o.hex),
+            o.typecode.clone(),
+            note,
+            None,
+            now,
+        ));
+    }
+    if let Some(t) = rarest_types.first() {
+        let since = t.first_seen.map(local_day);
+        headline.push(record_line(
+            "Rarest type",
+            t.odds_str(),
+            "",
+            t.designator.clone(),
+            format!("/type/{}", t.designator),
+            None,
+            t.name.clone(),
+            since,
+            now,
+        ));
+    }
+
     Ok(Records {
+        fleet,
+        visits_total,
         one_hit_count,
         one_hits,
+        headline,
         longest_visits,
-        steepest_climbs: records_by(&conn, "a.max_baro_rate", "DESC", 5)?,
-        steepest_descents: records_by(&conn, "a.min_baro_rate", "ASC", 5)?,
         oldest,
         rarest_types,
         top_callsigns,
@@ -779,6 +1109,11 @@ impl Record {
             (None, Some(t)) => t.clone(),
             (None, None) => self.hex.clone(),
         }
+    }
+    /// Registration or callsign alone, for tables that give the type its own
+    /// column.
+    pub fn holder(&self) -> String {
+        self.name.clone().unwrap_or_else(|| self.hex.clone())
     }
     /// `/type/<code>` — only `top_type` stores a designator in `hex`.
     pub fn type_url(&self) -> Option<String> {
@@ -1461,6 +1796,17 @@ impl TodaySummary {
     pub fn last_str(&self) -> Option<String> {
         self.last_ts.map(Self::fmt_ts)
     }
+    /// The card numerals run past four digits today (messages ~1M), and the
+    /// ungrouped string was unreadable next to the Feeder panel's "10,015".
+    pub fn messages_str(&self) -> String {
+        thousands(self.messages)
+    }
+    pub fn sightings_str(&self) -> String {
+        thousands(self.sightings)
+    }
+    pub fn polls_str(&self) -> String {
+        thousands(self.polls)
+    }
     /// `HH:MM–HH:MM` local span of today's activity.
     pub fn span_str(&self) -> String {
         match (self.first_str(), self.last_str()) {
@@ -1472,9 +1818,35 @@ impl TodaySummary {
 
 fn fmt_num(v: f64) -> String {
     if (v - v.round()).abs() < f64::EPSILON {
-        format!("{}", v as i64)
+        thousands(v as i64)
     } else {
-        format!("{v:.1}")
+        let s = format!("{v:.1}");
+        match s.split_once('.') {
+            Some((head, tail)) => match head.parse::<i64>() {
+                Ok(n) => format!("{}.{tail}", thousands(n)),
+                Err(_) => s,
+            },
+            None => s,
+        }
+    }
+}
+
+/// `47000` and `10,015` appeared in one viewport: the network card grouped its
+/// totals, every other surface did not, and a third copy of this loop lived in
+/// `types.rs`. One formatter, one output.
+pub fn thousands(n: i64) -> String {
+    let digits = n.abs().to_string();
+    let mut out = String::with_capacity(digits.len() + digits.len() / 3);
+    for (i, ch) in digits.chars().enumerate() {
+        if i > 0 && (digits.len() - i) % 3 == 0 {
+            out.push(',');
+        }
+        out.push(ch);
+    }
+    if n < 0 {
+        format!("-{out}")
+    } else {
+        out
     }
 }
 
@@ -1779,21 +2151,37 @@ pub fn unique_by_day(db: &Db, now: f64) -> rusqlite::Result<Vec<DayValue>> {
     rows.collect()
 }
 
-/// Aircraft first seen per local day, last 90 days. This covers the full
-/// `aircraft` history, unlike the ledger-backed series.
-pub fn new_by_day(db: &Db, now: f64) -> rusqlite::Result<Vec<DayValue>> {
+/// Distinct aircraft ever heard, as a running total at the end of each local
+/// day. The per-day first-sighting count is a cohort: every airframe can be
+/// new once, so its line decays toward zero by construction and reads as a
+/// broken series. The running total is the ledger's actual growth — the
+/// product's whole point — and never falls.
+pub fn ledger_growth(db: &Db) -> rusqlite::Result<Vec<DayValue>> {
     let conn = crate::db_lock(db);
-    let cutoff = now - (RANGE_DAYS - 1) as f64 * 86_400.0;
     let mut stmt = conn.prepare(
         "SELECT strftime('%Y-%m-%d', first_seen, 'unixepoch', 'localtime') AS day,
                 COUNT(*)
-         FROM aircraft WHERE first_seen >= ?1
-         GROUP BY day ORDER BY day",
+         FROM aircraft GROUP BY day ORDER BY day",
     )?;
-    let rows = stmt.query_map(params![cutoff], |r| {
-        Ok(DayValue { day: r.get(0)?, value: r.get(1)? })
+    let rows = stmt.query_map([], |r| {
+        let day: String = r.get(0)?;
+        let n: f64 = r.get(1)?;
+        Ok((day, n))
     })?;
-    rows.collect()
+    let mut total = 0.0;
+    let mut out = Vec::new();
+    for row in rows {
+        let (day, n) = row?;
+        total += n;
+        out.push(DayValue { day, value: total });
+    }
+    Ok(out)
+}
+
+/// Aircraft whose first sighting is at or after `ts`.
+pub fn added_since(db: &Db, ts: f64) -> rusqlite::Result<i64> {
+    let conn = crate::db_lock(db);
+    conn.query_row("SELECT COUNT(*) FROM aircraft WHERE first_seen >= ?1", params![ts], |r| r.get(0))
 }
 
 /// One day of network coverage. `cover_pct` is `None` when the local poller
@@ -1867,7 +2255,7 @@ pub struct Activity {
     pub range: Vec<DayValue>,
     pub messages: Vec<DayValue>,
     pub unique: Vec<DayValue>,
-    pub new: Vec<DayValue>,
+    pub growth: Vec<DayValue>,
     pub coverage: Vec<CoverageDay>,
 }
 
@@ -1877,7 +2265,7 @@ pub fn activity(db: &Db, now: f64) -> rusqlite::Result<Activity> {
         range: range_by_day(db, now)?,
         messages: messages_by_day(db, now)?,
         unique: unique_by_day(db, now)?,
-        new: new_by_day(db, now)?,
+        growth: ledger_growth(db)?,
         coverage: coverage_by_day(db, now)?,
     })
 }
@@ -1954,13 +2342,10 @@ impl LineChart {
                 plot_right: 0.0,
             };
         }
-        let (min, max) = match (min_bound, max_bound) {
-            (Some(lo), Some(hi)) => (lo, hi),
-            _ => (
-                series.iter().map(|d| d.value).fold(f64::INFINITY, f64::min),
-                series.iter().map(|d| d.value).fold(f64::NEG_INFINITY, f64::max),
-            ),
-        };
+        let series_min = series.iter().map(|d| d.value).fold(f64::INFINITY, f64::min);
+        let series_max = series.iter().map(|d| d.value).fold(f64::NEG_INFINITY, f64::max);
+        let min = min_bound.unwrap_or(series_min);
+        let max = max_bound.unwrap_or(series_max).max(min);
         let flat = max - min < f64::EPSILON;
         let span = if flat { 1.0 } else { max - min };
         let n = series.len();
@@ -3369,6 +3754,34 @@ mod tests {
         assert_eq!(chart.y_labels.len(), 3);
         assert_eq!(chart.y_labels[0].text, "100");
         assert_eq!(chart.y_labels[2].text, "0");
+    }
+
+    #[test]
+    fn growth_chart_anchors_at_zero() {
+        // A running total starts high, so an unbounded min would amplify the
+        // slope and hide how much of the ledger is new. One bound is enough.
+        let series = vec![
+            super::DayValue { day: "2026-01-01".into(), value: 900.0 },
+            super::DayValue { day: "2026-01-02".into(), value: 1000.0 },
+        ];
+        let chart = super::LineChart::build_bounded(&series, Some(0.0), None);
+        assert_eq!(chart.min, 0.0);
+        assert_eq!(chart.max, 1000.0);
+        assert_eq!(chart.y_labels[2].text, "0");
+    }
+
+    #[test]
+    fn rarity_reads_as_odds_not_a_rounded_percentage() {
+        let rare = |caught, registered| super::RarestType {
+            designator: "C182".into(),
+            name: "Cessna 182".into(),
+            caught,
+            registered,
+            first_seen: None,
+        };
+        assert_eq!(rare(1, 11655).odds_str(), "1 in 11,655");
+        assert_eq!(rare(2, 345).odds_str(), "2 in 345");
+        assert_eq!(rare(1, 0).odds_str(), "-");
     }
 
     #[test]

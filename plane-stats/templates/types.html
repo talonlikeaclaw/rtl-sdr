@@ -29,11 +29,12 @@
         </span>
         <div>
           <h1>Type dex</h1>
-          <p class="tagline">{{ summary.types }} types caught · {{ summary.airframes }} airframes · {{ summary.pct_str() }} of the ICAO dex</p>
+          <p class="tagline">{{ summary.types }} types caught · {{ summary.airframes }} airframes · {{ summary.pct_str() }} of the ICAO dex{% if !q.is_empty() %} · {{ dex.len() }} matching{% endif %}</p>
         </div>
       </div>
       <div class="hero-tools">
         {% include "partials/nav.html" %}
+        {% include "partials/status.html" %}
       </div>
     </header>
 
@@ -57,16 +58,16 @@
         <div class="filter-row" role="group" aria-label="Sort">
           <span class="filter-label">Sort</span>
           <div class="chips">
-            <a class="chip{% if sort == "count" %} chip-on{% endif %}" href="/types?sort=count{{ q_suffix }}">Most caught</a>
-            <a class="chip{% if sort == "rarity" %} chip-on{% endif %}" href="/types?sort=rarity{{ q_suffix }}">Rarest</a>
-            <a class="chip{% if sort == "recent" %} chip-on{% endif %}" href="/types?sort=recent{{ q_suffix }}">Recently heard</a>
-            <a class="chip{% if sort == "name" %} chip-on{% endif %}" href="/types?sort=name{{ q_suffix }}">Name</a>
+            <a class="chip{% if sort == "count" %} chip-on{% endif %}" href="/types?sort=count{{ q_suffix }}"{% if sort == "count" %} aria-current="true"{% endif %}>Most caught</a>
+            <a class="chip{% if sort == "rarity" %} chip-on{% endif %}" href="/types?sort=rarity{{ q_suffix }}"{% if sort == "rarity" %} aria-current="true"{% endif %}>Rarest</a>
+            <a class="chip{% if sort == "recent" %} chip-on{% endif %}" href="/types?sort=recent{{ q_suffix }}"{% if sort == "recent" %} aria-current="true"{% endif %}>Recently heard</a>
+            <a class="chip{% if sort == "name" %} chip-on{% endif %}" href="/types?sort=name{{ q_suffix }}"{% if sort == "name" %} aria-current="true"{% endif %}>Name</a>
           </div>
         </div>
 
         <div class="type-grid">
           {% for t in dex %}
-          <a class="type-card glass" href="/type/{{ t.designator }}">
+          <a class="type-card" href="/type/{{ t.designator }}">
             <div class="type-photo">
               {% if let Some(img) = t.image() %}
               <img src="{{ img }}" alt="{{ t.display_name() }}" loading="lazy">

@@ -1,3 +1,11 @@
+{# Empty state outside the table: inside the well it inherited the 10-column
+   width. With the poller stalled the same line is the receiver's own warning. #}
+{% if live.is_empty() %}
+<p class="empty-row">
+  {% if let Some(s) = poller.sentence() %}<span class="warn">{{ s }}</span>
+  {% else %}Nothing overhead right now — the receiver is polling and hearing nothing.{% endif %}
+</p>
+{% else %}
 <table>
   <caption class="sr-only">Aircraft currently overhead, nearest first</caption>
   <thead>
@@ -15,12 +23,6 @@
     </tr>
   </thead>
   <tbody>
-    {% if live.is_empty() %}
-    <tr><td colspan="10" class="empty-row">
-      {% if let Some(s) = poller.sentence() %}<span class="warn">{{ s }}</span>
-      {% else %}Nothing overhead right now — the receiver is polling and hearing nothing.{% endif %}
-    </td></tr>
-    {% endif %}
     {% for a in live %}
     <tr>
       <td><a href="/aircraft/{{ a.hex }}">{% if let Some(cs) = a.last_flight %}{{ cs }}{% else %}{{ a.hex }}{% endif %}</a></td>
@@ -42,3 +44,4 @@
     {% endfor %}
   </tbody>
 </table>
+{% endif %}

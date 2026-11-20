@@ -35,6 +35,7 @@
       </div>
       <div class="hero-tools">
         {% include "partials/nav.html" %}
+        {% include "partials/status.html" %}
       </div>
     </header>
 
@@ -78,18 +79,18 @@
       <section class="glass panel" aria-label="Your catches">
         <h2>Your catches</h2>
         <div class="table-wrap">
-          <table>
+          <table class="kv">
             <caption class="sr-only">Catch stats for {{ detail.row.designator }}</caption>
             <tbody>
-              <tr><th>Airframes caught</th><td>{{ detail.row.caught }}</td></tr>
-              <tr><th>Registered in OpenSky</th><td>{{ detail.row.registered }}</td></tr>
-              <tr><th>Share of registry</th><td>{{ detail.row.pct_str() }}</td></tr>
-              <tr><th>First seen</th><td>{{ detail.row.first_seen_str() }}</td></tr>
-              <tr><th>Last seen</th><td>{{ detail.row.last_seen_str() }}</td></tr>
-              <tr><th>Polls seen</th><td>{{ detail.row.sightings }}</td></tr>
-              <tr><th>Max altitude (ft)</th><td>{% if let Some(v) = detail.row.max_alt_ft %}{{ v }}{% else %}-{% endif %}</td></tr>
-              <tr><th>Max speed (kt)</th><td>{% if let Some(v) = detail.row.max_gs_kts %}{{ v }}{% else %}-{% endif %}</td></tr>
-              <tr><th>Max range (nm)</th><td>{% if let Some(v) = detail.row.max_range_nm %}{{ v }}{% else %}-{% endif %}</td></tr>
+              <tr><th scope="row">Airframes caught</th><td>{{ detail.row.caught }}</td></tr>
+              <tr><th scope="row">Registered in OpenSky</th><td>{{ detail.row.registered }}</td></tr>
+              <tr><th scope="row">Share of registry</th><td>{{ detail.row.pct_str() }}</td></tr>
+              <tr><th scope="row">First seen</th><td>{{ detail.row.first_seen_str() }}</td></tr>
+              <tr><th scope="row">Last seen</th><td>{{ detail.row.last_seen_str() }}</td></tr>
+              <tr><th scope="row">Polls seen</th><td>{{ detail.row.sightings }}</td></tr>
+              <tr><th scope="row">Max altitude (ft)</th><td>{% if let Some(v) = detail.row.max_alt_ft %}{{ v }}{% else %}-{% endif %}</td></tr>
+              <tr><th scope="row">Max speed (kt)</th><td>{% if let Some(v) = detail.row.max_gs_kts %}{{ v }}{% else %}-{% endif %}</td></tr>
+              <tr><th scope="row">Max range (nm)</th><td>{% if let Some(v) = detail.row.max_range_nm %}{{ v }}{% else %}-{% endif %}</td></tr>
             </tbody>
           </table>
         </div>
@@ -118,21 +119,21 @@
           <table>
             <caption class="sr-only">Every {{ detail.row.designator }} heard, most recent first</caption>
             <thead>
-              <tr><th>Hex</th><th>Registration</th><th>Country</th><th>Operator</th><th>First seen</th><th>Last seen</th><th>Polls</th><th>Max alt</th><th>Max speed</th><th>Max range</th></tr>
+              <tr><th scope="col">Hex</th><th scope="col">Registration</th><th scope="col" class="col-secondary">Country</th><th scope="col" class="col-secondary">Operator</th><th scope="col" class="col-secondary">First seen</th><th scope="col">Last seen</th><th scope="col">Polls</th><th scope="col" class="col-secondary">Max alt</th><th scope="col" class="col-secondary">Max speed</th><th scope="col" class="col-secondary">Max range</th></tr>
             </thead>
             <tbody>
               {% for a in detail.airframes %}
               <tr>
                 <td class="hex mono"><a href="/aircraft/{{ a.hex }}">{{ a.hex }}</a></td>
                 <td class="mono">{{ a.registration.as_deref().unwrap_or("-") }}</td>
-                <td title="{{ a.country_name() }}">{% if a.country.is_some() %}{{ a.country_flag() }} <span class="mono">{{ a.country_code() }}</span>{% else %}-{% endif %}</td>
-                <td>{{ a.operator_str() }}</td>
-                <td>{{ a.first_seen_str() }}</td>
+                <td title="{{ a.country_name() }}" class="col-secondary">{% if a.country.is_some() %}{{ a.country_flag() }} <span class="mono">{{ a.country_code() }}</span>{% else %}-{% endif %}</td>
+                <td class="col-secondary">{{ a.operator_str() }}</td>
+                <td class="col-secondary">{{ a.first_seen_str() }}</td>
                 <td>{{ a.last_seen_str() }}</td>
                 <td>{{ a.sightings }}</td>
-                <td>{% if let Some(v) = a.max_alt_ft %}{{ v }}{% else %}-{% endif %}</td>
-                <td>{% if let Some(v) = a.max_gs_kts %}{{ v }}{% else %}-{% endif %}</td>
-                <td>{% if let Some(v) = a.max_range_nm %}{{ v }}{% else %}-{% endif %}</td>
+                <td class="col-secondary">{% if let Some(v) = a.max_alt_ft %}{{ v }}{% else %}-{% endif %}</td>
+                <td class="col-secondary">{% if let Some(v) = a.max_gs_kts %}{{ v }}{% else %}-{% endif %}</td>
+                <td class="col-secondary">{% if let Some(v) = a.max_range_nm %}{{ v }}{% else %}-{% endif %}</td>
               </tr>
               {% endfor %}
             </tbody>

@@ -1,7 +1,7 @@
 <p class="coverage-status{% if coverage.stale %} stale{% endif %}">{{ coverage.status_str() }}</p>
 
 <div class="card-group">
-  <div class="cards">
+  <div class="cards five">
     <div class="card"><div class="num">{{ coverage.local_count }}</div><div class="sub">local live</div><div class="who">heard in the last 60 s</div></div>
     <div class="card"><div class="num">{% if coverage.stale %}-{% else %}{{ coverage.network_count }}{% endif %}</div><div class="sub">network live</div><div class="who">{% if coverage.stale %}last good poll{% else %}within {{ coverage.radius_nm }} NM{% endif %}</div></div>
     <div class="card"><div class="num">{% if coverage.stale %}-{% else %}{{ coverage.overlap }}{% endif %}</div><div class="sub">overlap</div><div class="who">{% if coverage.stale %}last good poll{% else %}heard by both{% endif %}</div></div>
@@ -17,17 +17,17 @@
 <div class="table-wrap">
   <table>
     <caption class="sr-only">Aircraft only the local receiver heard in the last 60 s</caption>
-    <thead><tr><th scope="col">Hex</th><th scope="col">Callsign</th><th scope="col">Registration</th><th scope="col">Type</th><th scope="col">Alt (ft)</th><th scope="col">Range (nm)</th><th scope="col">Last seen</th><th scope="col">Links</th></tr></thead>
+    <thead><tr><th scope="col">Hex</th><th scope="col">Callsign</th><th scope="col" class="col-secondary">Registration</th><th scope="col">Type</th><th scope="col">Alt (ft)</th><th scope="col" class="col-secondary">Range (nm)</th><th scope="col" class="col-secondary">Last seen</th><th scope="col">Links</th></tr></thead>
     <tbody>
       {% for r in coverage.unique_rows %}
       <tr>
         <td class="hex">{{ r.hex }}</td>
         <td>{% if let Some(v) = r.flight %}{{ v }}{% else %}-{% endif %}</td>
-        <td>{% if let Some(v) = r.registration %}{{ v }}{% else %}-{% endif %}</td>
+        <td class="col-secondary">{% if let Some(v) = r.registration %}{{ v }}{% else %}-{% endif %}</td>
         <td class="mono">{% if let Some(u) = r.type_url() %}<a href="{{ u }}">{{ r.typecode.as_deref().unwrap_or("-") }}</a>{% else %}{{ r.typecode.as_deref().unwrap_or("-") }}{% endif %}</td>
         <td>{{ r.alt_str() }}</td>
-        <td>{{ r.dst_str() }}</td>
-        <td>{{ r.last_seen_local.as_deref().unwrap_or("-") }}</td>
+        <td class="col-secondary">{{ r.dst_str() }}</td>
+        <td class="col-secondary">{{ r.last_seen_local.as_deref().unwrap_or("-") }}</td>
         <td class="links">
           {% if let Some(u) = r.map_url(tar1090.as_str()) %}<a href="{{ u }}" target="_blank" rel="noopener">map</a>{% endif %}
           {% if let Some(u) = r.trace_url(tar1090.as_str()) %}<a href="{{ u }}" target="_blank" rel="noopener">trace</a>{% endif %}
@@ -46,18 +46,18 @@
 <div class="table-wrap">
   <table>
     <caption class="sr-only">Aircraft adsb.fi heard in the last 60 s that the local receiver did not</caption>
-    <thead><tr><th scope="col">Hex</th><th scope="col">Callsign</th><th scope="col">Registration</th><th scope="col">Type</th><th scope="col">Alt (ft)</th><th scope="col">Range (nm)</th><th scope="col">Bearing</th><th scope="col">Age</th><th scope="col">MLAT</th><th scope="col">adsb.fi</th></tr></thead>
+    <thead><tr><th scope="col">Hex</th><th scope="col">Callsign</th><th scope="col" class="col-secondary">Registration</th><th scope="col">Type</th><th scope="col">Alt (ft)</th><th scope="col" class="col-secondary">Range (nm)</th><th scope="col" class="col-secondary">Bearing</th><th scope="col" class="col-secondary">Age</th><th scope="col">MLAT</th><th scope="col">adsb.fi</th></tr></thead>
     <tbody>
       {% for r in coverage.missed_rows %}
       <tr>
         <td class="hex">{{ r.hex }}</td>
         <td>{% if let Some(v) = r.flight %}{{ v }}{% else %}-{% endif %}</td>
-        <td>{% if let Some(v) = r.registration %}{{ v }}{% else %}-{% endif %}</td>
+        <td class="col-secondary">{% if let Some(v) = r.registration %}{{ v }}{% else %}-{% endif %}</td>
         <td class="mono">{% if let Some(u) = r.type_url() %}<a href="{{ u }}">{{ r.typecode.as_deref().unwrap_or("-") }}</a>{% else %}{{ r.typecode.as_deref().unwrap_or("-") }}{% endif %}</td>
         <td>{{ r.alt_str() }}</td>
-        <td>{{ r.dst_str() }}</td>
-        <td>{{ r.dir_str() }}</td>
-        <td>{{ r.seen_str() }}</td>
+        <td class="col-secondary">{{ r.dst_str() }}</td>
+        <td class="col-secondary">{{ r.dir_str() }}</td>
+        <td class="col-secondary">{{ r.seen_str() }}</td>
         <td>{% if r.mlat_pos %}<span class="mlat-badge">MLAT</span>{% else %}-{% endif %}</td>
         <td class="links"><a href="{{ r.adsb_url() }}" target="_blank" rel="noopener">adsb.fi</a></td>
       </tr>

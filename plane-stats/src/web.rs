@@ -469,8 +469,6 @@ struct TableRowsTemplate {
     rows: Vec<AircraftRow>,
     tar1090: String,
     now: f64,
-    /// Distinguishes "nothing matches these filters" from an empty ledger.
-    filtered: bool,
 }
 
 async fn table_rows_partial(
@@ -482,7 +480,6 @@ async fn table_rows_partial(
     let view = fleet_view(&db, &q, now)?;
     Ok(Html(
         TableRowsTemplate {
-            filtered: view.filter.is_active(),
             rows: view.rows,
             tar1090: tar1090_base(&headers),
             now,
@@ -564,6 +561,7 @@ struct TodayTemplate {
     hours_max: i64,
     records: Vec<stats::DayRecord>,
     new: Vec<AircraftRow>,
+    poller: stats::PollerHealth,
     active: &'static str,
     tar1090: String,
 }
@@ -579,6 +577,7 @@ async fn today_page(State(db): State<Db>, headers: HeaderMap) -> Result<Html<Str
             hours_max,
             records: stats::records_today(&db, now)?,
             new: stats::new_today(&db, now)?,
+            poller: stats::PollerHealth::new(stats::last_poll_age(&db, now)?),
             active: "today",
             tar1090: tar1090_base(&headers),
         }
@@ -607,9 +606,11 @@ struct ActivityTemplate {
     range: stats::LineChart,
     messages: stats::LineChart,
     unique: stats::LineChart,
-    new: stats::LineChart,
+    growth: stats::LineChart,
+    growth_note: String,
     coverage_chart: stats::LineChart,
     coverage: Vec<stats::CoverageDay>,
+    poller: stats::PollerHealth,
     active: &'static str,
     tar1090: String,
 }
@@ -620,7 +621,22 @@ async fn activity_page(State(db): State<Db>, headers: HeaderMap) -> Result<Html<
     let range = stats::range_by_day(&db, now)?;
     let messages = stats::messages_by_day(&db, now)?;
     let unique = stats::unique_by_day(&db, now)?;
-    let new = stats::new_by_day(&db, now)?;
+    let growth_series = stats::ledger_growth(&db)?;
+    let added = stats::added_since(&db, now - 7.0 * 86_400.0)?;
+    let total = growth_series.last().map(|p| p.value as i64).unwrap_or(0);
+    let growth_note = if total > 0 && added == total {
+        format!("{} aircraft · all first heard in the last 7 days", stats::thousands(total))
+    } else {
+        match added {
+            0 => format!("{} aircraft · none added in the last 7 days", stats::thousands(total)),
+            1 => format!("{} aircraft · 1 added in the last 7 days", stats::thousands(total)),
+            n => format!(
+                "{} aircraft · {} added in the last 7 days",
+                stats::thousands(total),
+                stats::thousands(n)
+            ),
+        }
+    };
     let coverage = stats::coverage_by_day(&db, now)?;
     let coverage_series: Vec<stats::DayValue> = coverage
         .iter()
@@ -638,9 +654,11 @@ async fn activity_page(State(db): State<Db>, headers: HeaderMap) -> Result<Html<
             range: stats::LineChart::build(&range),
             messages: stats::LineChart::build(&messages),
             unique: stats::LineChart::build(&unique),
-            new: stats::LineChart::build(&new),
+            growth: stats::LineChart::build_bounded(&growth_series, Some(0.0), None),
+            growth_note,
             coverage_chart: stats::LineChart::build_bounded(&coverage_series, Some(0.0), Some(100.0)),
             coverage,
+            poller: stats::PollerHealth::new(stats::last_poll_age(&db, now)?),
             active: "activity",
             tar1090: tar1090_base(&headers),
         }
@@ -656,6 +674,7 @@ async fn api_activity(State(db): State<Db>) -> Result<Json, ApiError> {
 #[template(path = "records.html")]
 struct RecordsTemplate {
     records: stats::Records,
+    poller: stats::PollerHealth,
     active: &'static str,
     tar1090: String,
 }
@@ -664,6 +683,7 @@ async fn records_page(State(db): State<Db>, headers: HeaderMap) -> Result<Html<S
     Ok(Html(
         RecordsTemplate {
             records: stats::records(&db)?,
+            poller: stats::PollerHealth::new(stats::last_poll_age(&db, now())?),
             active: "records",
             tar1090: tar1090_base(&headers),
         }
@@ -680,6 +700,7 @@ async fn api_records(State(db): State<Db>) -> Result<Json, ApiError> {
 struct CoverageTemplate {
     coverage: stats::NetworkCoverage,
     polar: stats::PolarChart,
+    poller: stats::PollerHealth,
     active: &'static str,
     tar1090: String,
 }
@@ -690,6 +711,7 @@ async fn coverage_page(State(db): State<Db>, headers: HeaderMap) -> Result<Html<
         CoverageTemplate {
             coverage: stats::network_coverage(&db, now)?,
             polar: stats::receiver_polar(&db, now)?,
+            poller: stats::PollerHealth::new(stats::last_poll_age(&db, now)?),
             active: "coverage",
             tar1090: tar1090_base(&headers),
         }
@@ -739,6 +761,7 @@ struct TypesTemplate {
     q: String,
     /// `&q=...` for the sort links, empty when the search box is blank.
     q_suffix: String,
+    poller: stats::PollerHealth,
     active: &'static str,
     tar1090: String,
 }
@@ -785,6 +808,7 @@ async fn types_page(
             sort,
             q: search,
             q_suffix,
+            poller: stats::PollerHealth::new(stats::last_poll_age(&db, now())?),
             active: "types",
             tar1090: tar1090_base(&headers),
         }
@@ -796,6 +820,7 @@ async fn types_page(
 #[template(path = "type.html")]
 struct TypeTemplate {
     detail: stats::TypeDetail,
+    poller: stats::PollerHealth,
     active: &'static str,
     tar1090: String,
 }
@@ -829,7 +854,13 @@ async fn type_page(
         return Ok((StatusCode::NOT_FOUND, Html(body)).into_response());
     };
     Ok(Html(
-        TypeTemplate { detail, active: "types", tar1090: tar1090_base(&headers) }.render()?,
+        TypeTemplate {
+            detail,
+            poller: stats::PollerHealth::new(stats::last_poll_age(&db, now())?),
+            active: "types",
+            tar1090: tar1090_base(&headers),
+        }
+        .render()?,
     )
     .into_response())
 }
@@ -845,6 +876,7 @@ struct CountryParams {
 struct CountriesTemplate {
     rows: Vec<stats::CountryRow>,
     sort: String,
+    poller: stats::PollerHealth,
     active: &'static str,
     tar1090: String,
 }
@@ -867,6 +899,7 @@ async fn countries_page(
         CountriesTemplate {
             rows,
             sort,
+            poller: stats::PollerHealth::new(stats::last_poll_age(&db, now())?),
             active: "countries",
             tar1090: tar1090_base(&headers),
         }
@@ -945,6 +978,7 @@ struct AircraftTemplate {
     visits: Vec<VisitView>,
     schedule: stats::Schedule,
     route: Option<crate::routes::Route>,
+    poller: stats::PollerHealth,
     active: &'static str,
     tar1090: String,
     now: f64,
@@ -1030,6 +1064,7 @@ async fn aircraft_profile(
             visits,
             schedule,
             route,
+            poller: stats::PollerHealth::new(stats::last_poll_age(&db, now())?),
             active: "",
             tar1090: tar1090_base(&headers),
             now: now(),

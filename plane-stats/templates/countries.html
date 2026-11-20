@@ -34,6 +34,7 @@
       </div>
       <div class="hero-tools">
         {% include "partials/nav.html" %}
+        {% include "partials/status.html" %}
       </div>
     </header>
 
@@ -62,25 +63,25 @@
                 <th scope="col">Country</th>
                 <th scope="col">Aircraft</th>
                 <th scope="col">Share</th>
-                <th scope="col">Types</th>
-                <th scope="col">Best range (nm)</th>
-                <th scope="col">Last heard</th>
+                <th scope="col" class="col-secondary">Types</th>
+                <th scope="col" class="col-secondary">Best range (nm)</th>
+                <th scope="col" class="col-secondary">Last heard</th>
               </tr>
             </thead>
             <tbody>
               {% for c in rows %}
               <tr>
                 <td class="country-cell">
-                  <a href="{{ c.fleet_url() }}" aria-label="Show aircraft registered in {{ c.name }}"><span class="country-flag" aria-hidden="true">{{ c.flag() }}</span> {{ c.name }}</a>
+                  <a href="{{ c.fleet_url() }}" aria-label="Show aircraft registered in {{ c.name }}"><span class="country-flag" aria-hidden="true">{{ c.flag() }}</span><span class="country-name"> {{ c.name }}</span><span class="country-code mono">{{ c.code }}</span></a>
                 </td>
                 <td>{{ c.count }}</td>
                 <td class="share-cell">
                   <span class="share-bar" aria-hidden="true"><span style="width: {{ c.bar_pct() }}%"></span></span>
                   <span class="share-pct">{{ c.share_pct() }}</span>
                 </td>
-                <td>{{ c.types }}</td>
-                <td>{{ c.range_str() }}</td>
-                <td>{{ c.last_seen_str() }}</td>
+                <td class="col-secondary">{{ c.types }}</td>
+                <td class="col-secondary">{{ c.range_str() }}</td>
+                <td class="col-secondary">{{ c.last_seen_str() }}</td>
               </tr>
               {% endfor %}
             </tbody>

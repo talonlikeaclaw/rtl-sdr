@@ -1,0 +1,10 @@
+{# The one element allowed to report the receiver's state. It lives in the
+   header of every page, not only the dashboard: a digest or an activity page
+   that cannot say whether the poller is alive will happily present a day that
+   ended at 09:00 as current. #}
+<span class="pill status {{ poller.state() }}" title="Age of the most recent poll">
+  <span class="dot" aria-hidden="true"></span>
+  {% if poller.is_live() %}<span class="wave" aria-hidden="true"><span></span><span></span><span></span><span></span></span>{% endif %}
+  <span class="status-full">{{ poller.label() }}</span>
+  <span class="status-short">{{ poller.short_label() }}</span>
+</span>

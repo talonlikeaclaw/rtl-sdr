@@ -45,42 +45,79 @@
       </div>
       <div class="hero-tools">
         {% include "partials/nav.html" %}
+        {% include "partials/status.html" %}
       </div>
     </header>
 
     <main id="main">
+      {# The page used to open on a registry form: 18 rows of third-party data,
+         7 of them dashes, while the station's own telemetry was never shown —
+         even mid-pass. Three numbers and the audit trail answer "what is it
+         doing" before "who registered it". #}
+      <section class="glass panel" aria-label="Latest state">
+        <h2>Latest state</h2>
+        <p class="profile-status">
+          {% if row.is_live(now) %}<span class="live-note">Overhead now</span> · heard {{ row.age_str() }} s ago
+          {% else %}Last heard {{ row.last_seen_str() }}{% endif %}
+        </p>
+        <div class="card-group">
+          <div class="cards">
+            <div class="card">
+              <div class="num">{{ row.alt_str() }}</div>
+              <div class="sub">altitude (ft)</div>
+              <div class="who">{% if row.is_live(now) %}climb {{ row.climb_str() }} fpm{% else %}at last contact{% endif %}</div>
+            </div>
+            <div class="card">
+              <div class="num">{{ row.gs_str() }}</div>
+              <div class="sub">speed (kt)</div>
+              <div class="who">{% if let Some(v) = row.max_gs_kts %}max {{ v }} kt{% else %}no speed yet{% endif %}</div>
+            </div>
+            <div class="card">
+              <div class="num">{{ row.range_str() }}</div>
+              <div class="sub">range (nm)</div>
+              <div class="who">{% if let Some(v) = row.max_range_nm %}max {{ v }} nm{% else %}no range yet{% endif %}</div>
+            </div>
+            <div class="card">
+              <div class="num">{{ row.sightings }}</div>
+              <div class="sub">polls seen</div>
+              <div class="who">{{ visits.len() }} visit{% if visits.len() != 1 %}s{% endif %}</div>
+            </div>
+          </div>
+        </div>
+      </section>
+
       <section class="glass panel" aria-label="Identity">
         <h2>Identity</h2>
         <div class="table-wrap">
-          <table>
+          <table class="kv">
             <caption class="sr-only">Registration, model and operator for {{ row.hex }}</caption>
             <tbody>
               {% if row.registration.is_some() || enrich.is_some() %}
-              <tr><th>Country</th><td>{{ row.country_flag() }} {{ row.country_name() }}{% if row.country.is_some() %} <span class="mono">({{ row.country_code() }})</span>{% endif %}</td></tr>
-              <tr><th>Registration</th><td class="mono">{{ row.registration.as_deref().unwrap_or("-") }}</td></tr>
+              <tr><th scope="row">Country</th><td>{{ row.country_flag() }} {{ row.country_name() }}{% if row.country.is_some() %} <span class="mono">({{ row.country_code() }})</span>{% endif %}</td></tr>
+              <tr><th scope="row">Registration</th><td class="mono">{{ row.registration.as_deref().unwrap_or("-") }}</td></tr>
               {% if let Some(m) = enrich %}
-              <tr><th>Model</th><td>{{ m.model.as_deref().unwrap_or("-") }}{% if let Some(tc) = m.typecode %}{% if let Some(u) = row.type_url() %} (<a href="{{ u }}">{{ tc }}</a>){% else %} ({{ tc }}){% endif %}{% endif %}</td></tr>
+              <tr><th scope="row">Model</th><td>{{ m.model.as_deref().unwrap_or("-") }}{% if let Some(tc) = m.typecode %}{% if let Some(u) = row.type_url() %} (<a href="{{ u }}">{{ tc }}</a>){% else %} ({{ tc }}){% endif %}{% endif %}</td></tr>
               {% if let Some(d) = m.description %}
-              <tr><th>Description</th><td>{{ d }}</td></tr>
+              <tr><th scope="row">Description</th><td>{{ d }}</td></tr>
               {% endif %}
-              <tr><th>Manufacturer</th><td>{{ m.manufacturer.as_deref().unwrap_or("-") }}</td></tr>
-              <tr><th>Owner</th><td>{{ m.owner.as_deref().unwrap_or("-") }}</td></tr>
-              <tr><th>Operator</th><td>{{ m.operator.as_deref().unwrap_or("-") }}</td></tr>
-              <tr><th>Operator callsign</th><td class="mono">{{ m.operatorcallsign.as_deref().unwrap_or("-") }}</td></tr>
+              <tr><th scope="row">Manufacturer</th><td>{{ m.manufacturer.as_deref().unwrap_or("-") }}</td></tr>
+              <tr><th scope="row">Owner</th><td>{{ m.owner.as_deref().unwrap_or("-") }}</td></tr>
+              <tr><th scope="row">Operator</th><td>{{ m.operator.as_deref().unwrap_or("-") }}</td></tr>
+              <tr><th scope="row">Operator callsign</th><td class="mono">{{ m.operatorcallsign.as_deref().unwrap_or("-") }}</td></tr>
               {% if let Some(r) = route %}
-              <tr><th>Route</th><td>{{ r.summary() }} · {{ r.airports() }}{% if let Some(a) = r.airline %} · {{ a }}{% endif %}<br><span class="type-credit">Route data: <a href="https://www.adsbdb.com/" target="_blank" rel="noopener">adsbdb.com</a></span></td></tr>
+              <tr><th scope="row">Route</th><td>{{ r.summary() }} · {{ r.airports() }}{% if let Some(a) = r.airline %} · {{ a }}{% endif %}<br><span class="type-credit">Route data: <a href="https://www.adsbdb.com/" target="_blank" rel="noopener">adsbdb.com</a></span></td></tr>
               {% endif %}
-              <tr><th>Serial number</th><td class="mono">{{ m.serialnumber.as_deref().unwrap_or("-") }}</td></tr>
-              <tr><th>ICAO type</th><td class="mono">{{ m.icaoaircrafttype.as_deref().unwrap_or("-") }}</td></tr>
-              <tr><th>Engines</th><td>{{ m.engines.as_deref().unwrap_or("-") }}</td></tr>
-              <tr><th>Built</th><td>{{ m.built.as_deref().unwrap_or("-") }}</td></tr>
-              <tr><th>First flight</th><td>{{ m.firstflightdate.as_deref().unwrap_or("-") }}</td></tr>
-              <tr><th>Registered</th><td>{{ m.registered.as_deref().unwrap_or("-") }}</td></tr>
-              <tr><th>Registration valid until</th><td>{{ m.reguntil.as_deref().unwrap_or("-") }}</td></tr>
-              <tr><th>Status</th><td>{{ m.status.as_deref().unwrap_or("-") }}</td></tr>
-              <tr><th>Category</th><td>{{ m.categorydescription.as_deref().unwrap_or("-") }}</td></tr>
+              <tr><th scope="row">Serial number</th><td class="mono">{{ m.serialnumber.as_deref().unwrap_or("-") }}</td></tr>
+              <tr><th scope="row">ICAO type</th><td class="mono">{{ m.icaoaircrafttype.as_deref().unwrap_or("-") }}</td></tr>
+              <tr><th scope="row">Engines</th><td>{{ m.engines.as_deref().unwrap_or("-") }}</td></tr>
+              <tr><th scope="row">Built</th><td>{{ m.built.as_deref().unwrap_or("-") }}</td></tr>
+              <tr><th scope="row">First flight</th><td>{{ m.firstflightdate.as_deref().unwrap_or("-") }}</td></tr>
+              <tr><th scope="row">Registered</th><td>{{ m.registered.as_deref().unwrap_or("-") }}</td></tr>
+              <tr><th scope="row">Registration valid until</th><td>{{ m.reguntil.as_deref().unwrap_or("-") }}</td></tr>
+              <tr><th scope="row">Status</th><td>{{ m.status.as_deref().unwrap_or("-") }}</td></tr>
+              <tr><th scope="row">Category</th><td>{{ m.categorydescription.as_deref().unwrap_or("-") }}</td></tr>
               {% if let Some(n) = m.notes %}
-              <tr><th>Notes</th><td>{{ n }}</td></tr>
+              <tr><th scope="row">Notes</th><td>{{ n }}</td></tr>
               {% endif %}
               {% endif %}
               {% else %}
@@ -97,18 +134,18 @@
       <section class="glass panel" aria-label="Records">
         <h2>Records</h2>
         <div class="table-wrap">
-          <table>
+          <table class="kv">
             <caption class="sr-only">All-time records for {{ row.hex }}</caption>
             <tbody>
-              <tr><th>First seen</th><td>{{ row.first_seen_str() }}</td></tr>
-              <tr><th>Last seen</th><td>{{ row.last_seen_str() }}</td></tr>
-              <tr><th>Polls seen</th><td>{{ row.sightings }}</td></tr>
-              <tr><th>Max altitude (ft)</th><td>{% if let Some(v) = row.max_alt_ft %}{{ v }}{% else %}-{% endif %}</td></tr>
-              <tr><th>Max speed (kt)</th><td>{% if let Some(v) = row.max_gs_kts %}{{ v }}{% else %}-{% endif %}</td></tr>
-              <tr><th>Max range (nm)</th><td>{% if let Some(v) = row.max_range_nm %}{{ v }}{% else %}-{% endif %}</td></tr>
-              <tr><th>Strongest signal (dBFS)</th><td>{% if let Some(v) = row.max_rssi_dbfs %}{{ v }}{% else %}-{% endif %}</td></tr>
-              <tr><th>Max climb (ft/min)</th><td>{{ row.max_climb_str() }}</td></tr>
-              <tr><th>Max descent (ft/min)</th><td>{{ row.max_descent_str() }}</td></tr>
+              <tr><th scope="row">First seen</th><td>{{ row.first_seen_str() }}</td></tr>
+              <tr><th scope="row">Last seen</th><td>{{ row.last_seen_str() }}</td></tr>
+              <tr><th scope="row">Polls seen</th><td>{{ row.sightings }}</td></tr>
+              <tr><th scope="row">Max altitude (ft)</th><td>{% if let Some(v) = row.max_alt_ft %}{{ v }}{% else %}-{% endif %}</td></tr>
+              <tr><th scope="row">Max speed (kt)</th><td>{% if let Some(v) = row.max_gs_kts %}{{ v }}{% else %}-{% endif %}</td></tr>
+              <tr><th scope="row">Max range (nm)</th><td>{% if let Some(v) = row.max_range_nm %}{{ v }}{% else %}-{% endif %}</td></tr>
+              <tr><th scope="row">Strongest signal (dBFS)</th><td>{% if let Some(v) = row.max_rssi_dbfs %}{{ v }}{% else %}-{% endif %}</td></tr>
+              <tr><th scope="row">Max climb (ft/min)</th><td>{{ row.max_climb_str() }}</td></tr>
+              <tr><th scope="row">Max descent (ft/min)</th><td>{{ row.max_descent_str() }}</td></tr>
             </tbody>
           </table>
         </div>
@@ -117,14 +154,15 @@
       <section class="glass panel" aria-label="Last observed">
         <h2>Last observed</h2>
         <div class="table-wrap">
-          <table>
+          <table class="kv">
             <caption class="sr-only">Position and state at the last poll</caption>
             <tbody>
-              <tr><th>Position</th><td class="mono">{{ row.lat_lon_str() }}</td></tr>
-              <tr><th>Track</th><td>{{ row.track_str() }}</td></tr>
-              <tr><th>Selected altitude (ft)</th><td>{{ row.nav_alt_str() }}</td></tr>
-              <tr><th>Selected heading</th><td>{{ row.nav_hdg_str() }}</td></tr>
-              <tr><th>Emergency</th><td>{% if row.is_live(now) && row.emergency_active() %}<span class="emergency">{{ row.emergency_str() }}</span>{% else %}{{ row.emergency_str() }}{% endif %}</td></tr>
+              <tr><th scope="row">Last message</th><td>{% if row.is_live(now) %}{{ row.age_str() }} s ago{% else %}{{ row.last_seen_str() }}{% endif %}</td></tr>
+              <tr><th scope="row">Position</th><td class="mono">{{ row.lat_lon_str() }}</td></tr>
+              <tr><th scope="row">Track</th><td>{{ row.track_str() }}</td></tr>
+              <tr><th scope="row">Selected altitude (ft)</th><td>{{ row.nav_alt_str() }}</td></tr>
+              <tr><th scope="row">Selected heading</th><td>{{ row.nav_hdg_str() }}</td></tr>
+              <tr><th scope="row">Emergency</th><td>{% if row.is_live(now) && row.emergency_active() %}<span class="emergency">{{ row.emergency_value() }}</span>{% else %}{{ row.emergency_value() }}{% endif %}</td></tr>
             </tbody>
           </table>
         </div>
@@ -136,7 +174,7 @@
           <table>
             <caption class="sr-only">Every callsign heard from {{ row.hex }}, most recent first</caption>
             <thead>
-              <tr><th>Callsign</th><th>First seen</th><th>Last seen</th><th>Polls seen</th></tr>
+              <tr><th scope="col">Callsign</th><th scope="col">First seen</th><th scope="col">Last seen</th><th scope="col">Polls seen</th></tr>
             </thead>
             <tbody>
               {% for c in callsigns %}
@@ -171,15 +209,15 @@
           {% for h in schedule.hours %}<span>{% if h.show_label() %}{{ h.label() }}{% endif %}</span>{% endfor %}
         </div>
         <div class="table-wrap">
-          <table>
+          <table class="kv">
             <caption class="sr-only">Days heard and streaks for {{ row.hex }}</caption>
             <tbody>
-              <tr><th>Days heard</th><td>{{ schedule.days_heard }}</td></tr>
-              <tr><th>Current streak</th><td>{{ schedule.current_streak }} day{% if schedule.current_streak != 1 %}s{% endif %}</td></tr>
-              <tr><th>Longest streak</th><td>{{ schedule.longest_streak }} day{% if schedule.longest_streak != 1 %}s{% endif %}</td></tr>
-              <tr><th>Usual hour</th><td>{{ schedule.typical_str() }}</td></tr>
-              <tr><th>First day</th><td>{{ schedule.first_day.as_deref().unwrap_or("-") }}</td></tr>
-              <tr><th>Last day</th><td>{{ schedule.last_day.as_deref().unwrap_or("-") }}</td></tr>
+              <tr><th scope="row">Days heard</th><td>{{ schedule.days_heard }}</td></tr>
+              <tr><th scope="row">Current streak</th><td>{{ schedule.current_streak }} day{% if schedule.current_streak != 1 %}s{% endif %}</td></tr>
+              <tr><th scope="row">Longest streak</th><td>{{ schedule.longest_streak }} day{% if schedule.longest_streak != 1 %}s{% endif %}</td></tr>
+              <tr><th scope="row">Usual hour</th><td>{{ schedule.typical_str() }}</td></tr>
+              <tr><th scope="row">First day</th><td>{{ schedule.first_day.as_deref().unwrap_or("-") }}</td></tr>
+              <tr><th scope="row">Last day</th><td>{{ schedule.last_day.as_deref().unwrap_or("-") }}</td></tr>
             </tbody>
           </table>
         </div>
@@ -206,7 +244,7 @@
           <table>
             <caption class="sr-only">Each pass overhead, most recent first</caption>
             <thead>
-              <tr><th>Start</th><th>End</th><th>Duration</th><th>Polls seen</th></tr>
+              <tr><th scope="col">Start</th><th scope="col">End</th><th scope="col">Duration</th><th scope="col">Polls seen</th></tr>
             </thead>
             <tbody>
               {% for v in visits %}

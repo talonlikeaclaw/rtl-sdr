@@ -34,6 +34,7 @@
       </div>
       <div class="hero-tools">
         {% include "partials/nav.html" %}
+        {% include "partials/status.html" %}
       </div>
     </header>
 
@@ -89,7 +90,7 @@
       </section>
 
       <section class="glass panel" aria-label="Best range by day">
-        <h2>Best range by day</h2>
+        <h2>Best range by day (nm)</h2>
         {% if range.points.is_empty() %}
         <p class="empty-note">No range data yet. The line appears once aircraft report a distance.</p>
         {% else %}
@@ -110,7 +111,7 @@
               <circle class="chart-dot" cx="{{ p.x }}" cy="{{ p.y }}" r="2.4"><title>{{ p.label }} · {{ p.value_str() }} nm</title></circle>
               {% endfor %}
             </svg>
-            <div class="chart-axis"><span>{{ range.first_label }}</span><span>nm</span><span>{{ range.last_label }}</span></div>
+            <div class="chart-axis"><span>{{ range.first_label }}</span>{% if range.first_label != range.last_label %}<span>{{ range.last_label }}</span>{% endif %}</div>
           </div>
         </div>
         <details class="chart-table">
@@ -150,7 +151,7 @@
               <circle class="chart-dot" cx="{{ p.x }}" cy="{{ p.y }}" r="2.4"><title>{{ p.label }} · {{ p.value_str() }} aircraft</title></circle>
               {% endfor %}
             </svg>
-            <div class="chart-axis"><span>{{ unique.first_label }}</span><span>aircraft</span><span>{{ unique.last_label }}</span></div>
+            <div class="chart-axis"><span>{{ unique.first_label }}</span>{% if unique.first_label != unique.last_label %}<span>{{ unique.last_label }}</span>{% endif %}</div>
           </div>
         </div>
         <details class="chart-table">
@@ -166,37 +167,43 @@
         {% endif %}
       </section>
 
-      <section class="glass panel" aria-label="New aircraft by day">
-        <h2>New aircraft by day</h2>
-        {% if new.points.is_empty() %}
-        <p class="empty-note">No first sightings in the last 90 days.</p>
+      <section class="glass panel" aria-label="Aircraft ever heard">
+        <h2>Aircraft ever heard</h2>
+        {% if growth.points.is_empty() %}
+        <p class="empty-note">The ledger is empty. The line grows with every first sighting.</p>
         {% else %}
+        {# A line needs two points; one day of ledger would be a lone dot. #}
+        {% if growth.points.len() > 1 %}
         <div class="chart">
           <div class="chart-body">
             <div class="chart-y" aria-hidden="true">
-              {% for l in new.y_labels %}<span style="top: {{ l.top }}%">{{ l.text }}</span>{% endfor %}
+              {% for l in growth.y_labels %}<span style="top: {{ l.top }}%">{{ l.text }}</span>{% endfor %}
             </div>
-            <svg viewBox="0 0 {{ new.width }} {{ new.height }}" role="img" aria-label="New aircraft per day">
-              {% for l in new.y_labels %}
-              <line class="chart-grid" x1="{{ new.plot_left }}" x2="{{ new.plot_right }}" y1="{{ l.y }}" y2="{{ l.y }}"></line>
+            <svg viewBox="0 0 {{ growth.width }} {{ growth.height }}" role="img" aria-label="Total distinct aircraft in the ledger over time">
+              {% for l in growth.y_labels %}
+              <line class="chart-grid" x1="{{ growth.plot_left }}" x2="{{ growth.plot_right }}" y1="{{ l.y }}" y2="{{ l.y }}"></line>
               {% endfor %}
-              <path class="chart-area" d="{{ new.area }}"></path>
-              <path class="chart-line" d="{{ new.path }}"></path>
-              {% for p in new.points %}
-              <circle class="chart-dot" cx="{{ p.x }}" cy="{{ p.y }}" r="2.4"><title>{{ p.label }} · {{ p.value_str() }} new</title></circle>
+              <path class="chart-area" d="{{ growth.area }}"></path>
+              <path class="chart-line" d="{{ growth.path }}"></path>
+              {% for p in growth.points %}
+              <circle class="chart-dot" cx="{{ p.x }}" cy="{{ p.y }}" r="2.4"><title>{{ p.label }} · {{ p.value_str() }} aircraft</title></circle>
               {% endfor %}
             </svg>
-            <div class="chart-axis"><span>{{ new.first_label }}</span><span>new aircraft</span><span>{{ new.last_label }}</span></div>
+            <div class="chart-axis"><span>{{ growth.first_label }}</span>{% if growth.first_label != growth.last_label %}<span>{{ growth.last_label }}</span>{% endif %}</div>
           </div>
         </div>
-        <p class="chart-note">Covers the full aircraft history, unlike the ledger-backed series.</p>
+        {% endif %}
+        <p class="chart-note">
+          {% if growth.points.len() == 1 %}One day of ledger so far ({{ growth.first_label }}) — the chart appears when a second day is recorded.
+          {% else %}{{ growth_note }}{% endif %}
+        </p>
         <details class="chart-table">
           <summary>Show as table</summary>
           <div class="table-wrap">
             <table>
-              <caption class="sr-only">New aircraft per day</caption>
-              <thead><tr><th scope="col">Day</th><th scope="col">New aircraft</th></tr></thead>
-              <tbody>{% for p in new.points %}<tr><td>{{ p.label }}</td><td>{{ p.value_str() }}</td></tr>{% endfor %}</tbody>
+              <caption class="sr-only">Distinct aircraft ever heard, by day</caption>
+              <thead><tr><th scope="col">Day</th><th scope="col">Total heard</th></tr></thead>
+              <tbody>{% for p in growth.points %}<tr><td>{{ p.label }}</td><td>{{ p.value_str() }}</td></tr>{% endfor %}</tbody>
             </table>
           </div>
         </details>
@@ -204,10 +211,14 @@
       </section>
 
       <section class="glass panel" aria-label="Network coverage by day">
-        <h2>Network coverage by day</h2>
+        <h2>Network coverage by day (%)</h2>
         {% if coverage_chart.points.is_empty() %}
         <p class="empty-note">No network coverage data yet. Days with no local polls are omitted.</p>
         {% else %}
+        {# A line needs two points. With one day of network data the chart was a
+           lone dot floating mid-grid, which reads as a broken series; the note
+           and the table carry the single value until a second day exists. #}
+        {% if coverage_chart.points.len() > 1 %}
         <div class="chart">
           <div class="chart-body">
             <div class="chart-y" aria-hidden="true">
@@ -223,10 +234,14 @@
               <circle class="chart-dot" cx="{{ p.x }}" cy="{{ p.y }}" r="2.4"><title>{{ p.label }} · {{ p.value_str() }}% covered</title></circle>
               {% endfor %}
             </svg>
-            <div class="chart-axis"><span>{{ coverage_chart.first_label }}</span><span>% covered</span><span>{{ coverage_chart.last_label }}</span></div>
+            <div class="chart-axis"><span>{{ coverage_chart.first_label }}</span>{% if coverage_chart.first_label != coverage_chart.last_label %}<span>{{ coverage_chart.last_label }}</span>{% endif %}</div>
           </div>
         </div>
-        <p class="chart-note">Days with no local polls are omitted.</p>
+        {% endif %}
+        <p class="chart-note">
+          {% if coverage_chart.points.len() == 1 %}One day of network data so far ({{ coverage_chart.first_label }}) — the chart appears when a second day is recorded.
+          {% else %}Days with no local polls are omitted.{% endif %}
+        </p>
         <details class="chart-table">
           <summary>Show as table</summary>
           <div class="table-wrap">
@@ -266,7 +281,7 @@
               <circle class="chart-dot" cx="{{ p.x }}" cy="{{ p.y }}" r="2.4"><title>{{ p.label }} · {{ p.value_str() }} messages</title></circle>
               {% endfor %}
             </svg>
-            <div class="chart-axis"><span>{{ messages.first_label }}</span><span>messages</span><span>{{ messages.last_label }}</span></div>
+            <div class="chart-axis"><span>{{ messages.first_label }}</span>{% if messages.first_label != messages.last_label %}<span>{{ messages.last_label }}</span>{% endif %}</div>
           </div>
         </div>
         <details class="chart-table">

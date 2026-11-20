@@ -35,12 +35,7 @@
       </div>
       <div class="hero-tools">
         {% include "partials/nav.html" %}
-        <span class="pill status {{ poller.state() }}" title="Age of the most recent poll">
-          <span class="dot" aria-hidden="true"></span>
-          {% if poller.is_live() %}<span class="wave" aria-hidden="true"><span></span><span></span><span></span><span></span></span>{% endif %}
-          <span class="status-full">{{ poller.label() }}</span>
-          <span class="status-short">{{ poller.short_label() }}</span>
-        </span>
+        {% include "partials/status.html" %}
       </div>
     </header>
 
@@ -51,16 +46,24 @@
     <main id="main">
       <section class="glass panel" aria-label="Overhead now">
         <h2>Overhead now</h2>
-        <div class="table-wrap live-wrap">
-          <div id="live" hx-get="/partials/live" hx-trigger="load, every 5s [document.visibilityState === 'visible']">
-            {% include "partials/live.html" %}
+        <div class="live-reserve">
+          <div class="table-wrap live-wrap">
+            {# The refresh pauses while focus is inside the panel. Without the
+               guard a 5 s tick replaced the focused row link and dropped the
+               keyboard user on <body> — the Focus-Safe Refresh Rule applies
+               here, not only on /coverage. #}
+            <div id="live" hx-get="/partials/live"
+                 hx-trigger="load, every 5s [document.visibilityState === 'visible' && !(document.activeElement && document.activeElement.closest('#live'))]">
+              {% include "partials/live.html" %}
+            </div>
           </div>
         </div>
       </section>
 
       <section class="glass panel" aria-label="Summary">
         <h2>Summary</h2>
-        <div id="cards" hx-get="/partials/cards" hx-trigger="every 10s [document.visibilityState === 'visible']">
+        <div id="cards" hx-get="/partials/cards"
+             hx-trigger="every 10s [document.visibilityState === 'visible' && !(document.activeElement && document.activeElement.closest('#cards'))]">
           {% include "partials/cards.html" %}
         </div>
       </section>
@@ -246,7 +249,7 @@
     <footer>LOCAL LEDGER · SQLITE · NO CLOUD</footer>
   </div>
 
-  <div id="net-note" class="net-note" role="status"></div>
+  {% include "partials/net-note.html" %}
   <script>
     // Swapping #fleet throws away the focused sort button. Put focus back on
     // the column the user just sorted, or keyboard sorting loses its place.
@@ -262,32 +265,6 @@
       const btn = [...document.querySelectorAll("#fleet th .sort")].find((b) => b.textContent.trim() === label);
       if (btn) btn.focus();
     });
-
-    // htmx leaves a failed swap in place and says nothing, so a 500 or a dropped
-    // connection looked exactly like a receiver that had gone quiet: every panel
-    // froze on its last good data with no explanation. One notice, cleared by
-    // the next successful request.
-    (() => {
-      const note = document.getElementById("net-note");
-      if (!note) return;
-      const show = (text) => {
-        note.textContent = text;
-        note.classList.add("show");
-      };
-      const hide = () => note.classList.remove("show");
-      document.body.addEventListener("htmx:responseError", (e) => {
-        show(`Update failed (${e.detail.xhr.status}). These panels are showing their last good data.`);
-      });
-      document.body.addEventListener("htmx:sendError", () => {
-        show("Cannot reach the server. These panels are showing their last good data.");
-      });
-      document.body.addEventListener("htmx:timeout", () => {
-        show("The server took too long to answer. These panels are showing their last good data.");
-      });
-      document.body.addEventListener("htmx:afterRequest", (e) => {
-        if (e.detail.successful) hide();
-      });
-    })();
   </script>
 </body>
 </html>

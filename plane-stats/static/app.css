@@ -41,6 +41,12 @@ a:hover { color: #c3ddf5; }
 }
 input, textarea { caret-color: var(--accent); }
 
+/* Form controls do not inherit the page font: the search field computed to
+   Arial 13.6px, the country select and the altitude fields to Arial 11.52px.
+   A second sans family is exactly what the One Voice Rule forbids, and the
+   fix belongs on the controls, not on the stack. */
+input, select, textarea, button { font-family: inherit; }
+
 .sr-only {
   position: absolute;
   width: 1px; height: 1px;
@@ -191,6 +197,30 @@ body::before {
 }
 .page-actions a { text-decoration: none; }
 .page-actions a:hover { text-decoration: underline; }
+/* The page actions and the provenance links are text-sized controls: the
+   24px floor comes from padding that cancels itself, so the layout does not
+   move but the target is tall enough to hit. */
+.page-actions a,
+.type-credit a { display: inline-block; padding: 0.32rem 0; margin: -0.32rem 0; }
+
+/* A key/value table is one fact per row: the label column hugs its text and
+   the value takes the rest. Left to `table-layout: auto` the label column of
+   /type's "Your catches" grew to 752px and put the value at x=685, 600px from
+   the label it belongs to. */
+.kv th { width: 1px; white-space: nowrap; }
+.kv td { white-space: normal; }
+@media (max-width: 640px) {
+  /* "Registration valid until" is 190px of nowrap and dragged the value
+     column past a 325px well. Give the label a fixed 40% instead of pure
+     min-content: at min-content every two-word label wrapped ("DAYS /
+     HEARD") while the value column sat half empty. */
+  .kv th { white-space: normal; width: 40%; }
+}
+
+/* State line above the profile summary: the one place the page says whether
+   the aircraft is up now or how long ago it was last heard. */
+.profile-status { margin: 0 0 0.85rem; font-size: 0.8rem; color: var(--muted); }
+.profile-status .live-note { color: var(--live); font-weight: 600; }
 
 .mark {
   display: grid;
@@ -341,6 +371,17 @@ h1 {
   margin: 0;
 }
 
+/* A group whose count is not a multiple of four left a lone card under three
+   empty cells: /today's fifth, /coverage's five. The default stays four
+   columns so sibling groups align; those are their own row. */
+@media (min-width: 1000px) {
+  .cards.five { grid-template-columns: repeat(5, minmax(0, 1fr)); }
+  /* Five-up is ~208px a card. The network card's note needs three lines at
+     that width; the two-line clamp hid "only network" — the number the card
+     exists to show. */
+  .cards.five .card .who { -webkit-line-clamp: 3; line-clamp: 3; }
+}
+
 .card {
   position: relative;
   padding: 1rem 1.1rem 1.05rem;
@@ -396,6 +437,8 @@ h1 {
   margin-top: 0.4rem;
   font-size: 0.78rem;
   color: var(--muted);
+  /* Counts live here ("954 new in the last 7 days"), so they hold columns. */
+  font-variant-numeric: tabular-nums;
   /* Two lines, not one clipped line: at 200% text a single-line ellipsis
      threw away the aircraft identity the card exists to show. */
   display: -webkit-box;
@@ -481,15 +524,16 @@ td { overflow-wrap: break-word; }
   overflow-y: auto;
   scrollbar-gutter: stable;
 }
-/* Fixed, not max-height: the live panel refreshes every 5 s and its row
-   count changes as aircraft come and go. A content-sized panel changed the
-   height of everything below it on every tick, which iOS Safari (no scroll
-   anchoring) turned into a page jump while reading the fleet. The table
-   scrolls inside the panel; the page layout stays put.
-   16.75rem = header (1.9rem) + 7 rows (2.03rem each) + the border and the
-   collapsed-border rounding, the usual peak over this receiver; the 8th
-   aircraft scrolls. */
-.live-wrap { height: 16.75rem; }
+/* The panel reserves the height of the usual peak (7 rows) so a changing
+   aircraft count never pushes the summary down — iOS Safari has no scroll
+   anchoring, and a content-sized panel turned every 5 s tick into a page
+   jump. The *reserve* holds the space, not the well: a fixed-height well with
+   three aircraft drew 139px of empty bordered box under the last row, more
+   than half the panel. Now the well hugs its rows and the space below it is
+   ordinary glass. 16.75rem = header (1.9rem) + 7 rows (2.03rem each) + the
+   border and collapsed-border rounding. */
+.live-reserve { min-height: 16.75rem; }
+.live-wrap { max-height: 16.75rem; }
 .tall-wrap { max-height: 60vh; }
 .live-wrap thead th,
 .tall-wrap thead th {
@@ -598,6 +642,26 @@ footer {
   .panel { padding: 1rem 0.9rem 1.1rem; }
   .cards { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .meta { display: none; }
+  /* A wide table keeps the columns that answer its panel and drops the rest.
+     At 390px the /today record table put Status at x=457 and the /countries
+     share at x=305 inside a 325px well, so the answer to the panel's own
+     question was off-screen with no cue — the edge vignette is deliberately
+     not a cue. These columns are marked in the templates. */
+  .col-secondary { display: none; }
+  /* The name is 120px of the 183px the sticky column took; the flag and the
+     code keep the row's identity and leave the share visible. The 9rem floor
+     is for the name, so it goes too. Two classes, not one: `.country-cell`'s
+     own rule comes later in the file and a bare class here would lose. */
+  .country-table .country-cell { min-width: 0; }
+  .country-name { display: none; }
+  /* A flag alone is not an identity (and on a machine with no colour-emoji
+     font it is two empty boxes), so the ISO code takes its place. Two
+     classes: the base `.country-code` rule is later in the file. */
+  .country-table .country-code { display: inline; }
+  /* The record book keeps Record · Value · Holder on a phone; the global
+     0.8rem gutters on four columns still pushed the holder off the well. */
+  .record-book th,
+  .record-book td { padding-inline: 0.5rem; }
 }
 
 /* The card grid reflows on its own width, not the viewport's. At 200% text a
@@ -610,6 +674,7 @@ footer {
 }
 @container cards (max-width: 10rem) {
   .cards { grid-template-columns: 1fr; }
+  .cards.pair { grid-template-columns: 1fr; }
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -699,7 +764,13 @@ input.search.type-search { flex: 1 1 16rem; width: auto; min-width: 0; margin: 0
   color: inherit; background: linear-gradient(160deg, var(--glass-top), var(--glass-bottom));
   border: 1px solid var(--stroke); border-radius: 8px; outline: none;
 }
-.country-select:focus { border-color: var(--accent-dim); }
+.country-select:focus {
+  border-color: var(--accent-dim);
+  /* Same halo as the other fields. `outline: none` plus a 1px border shift is
+     not a focus indicator — the stylesheet says so two rules further down and
+     the one control that never got the halo was the select. */
+  box-shadow: 0 0 0 2px rgba(158, 197, 232, 0.35);
+}
 
 /* Fleet pager */
 .pager {
@@ -710,7 +781,7 @@ input.search.type-search { flex: 1 1 16rem; width: auto; min-width: 0; margin: 0
   font-size: 0.78rem;
   color: var(--muted);
 }
-.pager-info { margin-right: auto; }
+.pager-info { margin-right: auto; font-variant-numeric: tabular-nums; }
 /* WCAG 2.5.8: 24×24 minimum. These controls are text-sized, so the hit area
    grows into the surrounding whitespace with an equal negative margin — the
    target gets taller without the row growing or the layout moving. */
@@ -750,7 +821,7 @@ input.search:focus,
 
 /* The header's liveness pill. Its whole job is to change when the receiver
    stops answering, so it carries three states and gates the waveform. */
-.pill.status { gap: 0.45rem; }
+.pill.status { gap: 0.45rem; font-variant-numeric: tabular-nums; }
 .pill.status .dot {
   width: 0.45rem;
   height: 0.45rem;
@@ -935,7 +1006,10 @@ input.search:focus,
   .nav-desktop { display: none; }
   .nav-disclosure { display: block; order: 2; }
   .hero { gap: 0.75rem 1rem; }
-  .hero-tools { gap: 0.4rem; }
+  /* When the brand block is two lines (a profile's hex · registration plus its
+     actions) the tools wrap to their own line; without `margin-left: auto`
+     they sat at the left edge, half a row away from the menu they belong to. */
+  .hero-tools { gap: 0.4rem; margin-left: auto; }
   .hero-tools .pill.status { order: 1; }
   .status-full { display: none; }
   .status-short { display: inline; }
@@ -943,8 +1017,11 @@ input.search:focus,
 
 @media (max-width: 720px) {
   /* The page title and the menu carry the header; the tagline would only
-     push the tools onto a second row. */
+     push the tools onto a second row. The error page is the exception: its
+     tagline *is* the specific message ("No aircraft with hex …"), and hiding
+     it left a phone with a title, one sentence and no way back. */
   .tagline { display: none; }
+  .tagline.error-message { display: block; }
 }
 
 @media (max-width: 380px) {
@@ -1270,7 +1347,7 @@ td.links a:hover { text-decoration: underline; }
   font-variant-numeric: tabular-nums;
 }
 
-.chart-note { font-size: 0.75rem; color: var(--muted); }
+.chart-note { margin: 0.45rem 0 0; font-size: 0.75rem; color: var(--muted); }
 
 .empty-note { margin: 0.3rem 0 0; font-size: 0.8rem; color: var(--muted); }
 
@@ -1283,8 +1360,26 @@ td.links a:hover { text-decoration: underline; }
   font-size: 0.8rem;
   line-height: 1.5;
   color: var(--muted);
+  /* `th, td` sets nowrap for the data grid. An empty state is a sentence, not
+     a cell: left nowrap it measured 1461px inside a 325px well on a phone and
+     the reader saw "No aircraft match these filters. Clear them to see" cut
+     off mid-word. */
+  white-space: normal;
+  overflow-wrap: anywhere;
 }
 .empty-row a { color: var(--accent); }
+/* An empty body must not keep the table's column width: with the header still
+   laid out, a 10-column table is 1,461px and the sentence is clipped to the
+   first 45 characters on a phone. Drop the header and let the row own the
+   well. `:has(td.empty-row)` is false the moment a real row lands. */
+.table-wrap:has(tbody td.empty-row) table { width: 100%; }
+.table-wrap:has(tbody td.empty-row) thead { display: none; }
+/* The fleet's empty state is a sibling of its well (see partials/table.html).
+   `:has(tr)` rather than `:empty`: the include leaves a text node behind, so
+   `:empty` never matched. */
+.fleet-empty { display: none; }
+#fleet:not(:has(#fleet-rows tr)) .fleet-empty { display: block; }
+#fleet:not(:has(#fleet-rows tr)) .table-wrap { display: none; }
 /* The receiver's own warning hue, already carried by the header pill. An empty
    live panel while polls are not landing is not "clear skies". */
 .empty-row .warn { color: var(--warning); }
@@ -1333,7 +1428,8 @@ td.links a:hover { text-decoration: underline; }
    `.alt-field input` set their own font-size above, and this has to win. */
 @media (max-width: 640px) {
   input.search,
-  .alt-field input { font-size: 16px; }
+  .alt-field input,
+  .country-select { font-size: 16px; }
 }
 
 /* Type dex ----------------------------------------------------------- */
@@ -1354,15 +1450,28 @@ td.links a:hover { text-decoration: underline; }
   grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
   gap: 0.9rem;
 }
-
+/* The dex is the one surface that was built out of `.glass` cards. At 141
+   cards that meant 141 nested backdrop-filter rasters inside a panel whose
+   backdrop is already blurred — invisible work at the same cost the `.card`
+   rule documents, and the reason the page scrolled at 44,000px on a phone.
+   Cards carry the card material instead: gradient, hairline, inset highlight,
+   no blur. */
 .type-card {
   display: flex;
   flex-direction: column;
   overflow: hidden;
   border-radius: 14px;
+  border: 1px solid rgba(255, 255, 255, 0.075);
+  background: linear-gradient(160deg, rgba(255, 255, 255, 0.06), rgba(255, 255, 255, 0.015));
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.11);
   color: inherit;
   text-decoration: none;
   transition: transform 0.15s ease, border-color 0.15s ease;
+}
+@media (max-width: 640px) {
+  /* Two columns of photos, not one: a single column of 141 cards was 44,000px
+     of scroll on a phone with the sort row 40 screens above the finger. */
+  .type-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0.6rem; }
 }
 .type-card:hover { transform: translateY(-2px); border-color: rgba(255, 255, 255, 0.18); }
 .type-card:focus-visible { outline: 2px solid var(--accent-dim); outline-offset: 3px; }
@@ -1425,7 +1534,9 @@ td.links a:hover { text-decoration: underline; }
 .type-facts { display: flex; flex-wrap: wrap; gap: 0.45rem; margin-top: 0.8rem; }
 .fact {
   padding: 0.25rem 0.6rem;
-  font-size: 0.7rem;
+  /* 0.75rem, not 0.7: the chip holds values ("2026-01-29", "35.9 m") as well
+     as labels, so it owes the 12px body floor, not the 11px label floor. */
+  font-size: 0.75rem;
   color: var(--muted);
   border: 1px solid var(--stroke);
   border-radius: 999px;
@@ -1461,21 +1572,71 @@ td.links a:hover { text-decoration: underline; }
 .polar-area { fill: rgba(158, 197, 232, 0.12); stroke: var(--stroke); stroke-width: 1; }
 .polar-recent { fill: none; stroke: var(--accent); stroke-width: 1.6; }
 .polar-dot { fill: var(--accent); }
+/* The plot shipped with zero text: no compass, no ring distances, so a bearing
+   sector could not be placed and a radius had to be counted. Labels are the
+   chart's scale, not decoration. */
+.polar-label,
+.polar-compass {
+  font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  font-variant-numeric: tabular-nums;
+  /* The SVG is a 360-unit viewBox drawn at 420px, so 10 units render at
+     ~11.7px — above the 11px floor. 9 units rendered at 10.5px. */
+  font-size: 10px;
+  fill: var(--faint);
+}
+.polar-compass { font-size: 11px; font-weight: 600; fill: var(--muted); }
 
 /* Aircraft schedule bars */
 .sched-bars { display: grid; grid-template-columns: repeat(24, minmax(0, 1fr));
               align-items: end; height: 80px; gap: 2px; }
 .sched-bar { height: var(--h); min-height: 0; background: var(--accent); border-radius: 2px; }
 .sched-hours { display: grid; grid-template-columns: repeat(24, minmax(0, 1fr));
-               gap: 2px; font-size: 0.55rem; color: var(--faint); text-align: center; }
+               /* 0.55rem rendered at 8.8px — under the 11px floor the hour
+                  histogram already holds at 0.7rem. */
+               gap: 2px; font-size: 0.7rem; color: var(--faint); text-align: center; }
 
-/* Records: a single summary card needs breathing room before its table. */
-.records-cards { margin-bottom: 1rem; }
+/* Records: the record book is a table of facts, not a leaderboard. The label
+   is a row header so it reads as a label, the value is the one strong numeral
+   in the row, and the detail wraps because it is a sentence ("3.9× the median
+   catch of 11.2 nm · since 14 Nov"). */
+.rec-label { white-space: normal; }
+.rec-value {
+  white-space: nowrap;
+  font-size: 0.95rem;
+  font-weight: 600;
+  color: #f1f5f9;
+  font-variant-numeric: tabular-nums;
+}
+.rec-value .unit {
+  font-size: 0.78rem;
+  font-weight: 500;
+  letter-spacing: 0.02em;
+  color: var(--muted);
+}
+.record-book .rec-note { white-space: normal; min-width: 12rem; color: var(--muted); }
+/* A record set within the week is the one live thing on the page; Mint is the
+   system's "broken record" hue. */
+.rec-fresh {
+  font-size: 0.7rem;
+  font-weight: 600;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  color: var(--live);
+}
+
+/* Two-card groups fill their row instead of leaving two cells of a four-column
+   grid empty. */
+.cards.pair { grid-template-columns: repeat(2, minmax(0, 22rem)); }
+/* At phone width a pair card is ~160px, and the ledger sentence needs a third
+   line ("49% of the 957 airframes in the ledger"). */
+.cards.pair .card .who { -webkit-line-clamp: 3; line-clamp: 3; }
 
 /* Countries: the share bar is the only graphic in the registry table. Its
    width is the country's fraction of every airframe whose country is known,
    with a 2% floor so a one-aircraft state still draws a mark. */
 .country-cell { min-width: 9rem; }
+/* The ISO code is the phone's stand-in for the country name. */
+.country-code { display: none; margin-left: 0.35rem; font-size: 0.78rem; color: var(--muted); }
 /* The country is the row's identity, so it stays put while the numeric
    columns scroll under it on a phone — the same pattern as the fleet hex. */
 .country-table th:first-child,
@@ -1521,3 +1682,7 @@ td.links a:hover { text-decoration: underline; }
 .cards + .group-label,
 .table-wrap + .group-label,
 .empty-row + .group-label { margin-top: 1.25rem; }
+
+/* Two adjacent tables in one panel are two tables: flushed together, the
+   second header row read as a data row and the columns did not line up. */
+.table-wrap + .table-wrap { margin-top: 0.75rem; }

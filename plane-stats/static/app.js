@@ -128,3 +128,30 @@
     if (e.target.closest("a")) menu.open = false;
   });
 })();
+
+/* Every htmx surface, one failure notice. htmx leaves a failed swap in place
+   and says nothing, so a 500 or a dropped connection used to look exactly like
+   a receiver that had gone quiet. The dashboard had this inline; /coverage has
+   an auto-refreshing panel too and froze silently. Both now include
+   partials/net-note.html and get the listeners here. */
+(() => {
+  const note = document.getElementById("net-note");
+  if (!note) return;
+  const show = (text) => {
+    note.textContent = text;
+    note.classList.add("show");
+  };
+  const hide = () => note.classList.remove("show");
+  document.body.addEventListener("htmx:responseError", (e) => {
+    show(`Update failed (${e.detail.xhr.status}). These panels are showing their last good data.`);
+  });
+  document.body.addEventListener("htmx:sendError", () => {
+    show("Cannot reach the server. These panels are showing their last good data.");
+  });
+  document.body.addEventListener("htmx:timeout", () => {
+    show("The server took too long to answer. These panels are showing their last good data.");
+  });
+  document.body.addEventListener("htmx:afterRequest", (e) => {
+    if (e.detail.successful) hide();
+  });
+})();

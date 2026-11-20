@@ -218,19 +218,7 @@ fn now_epoch() -> f64 {
 }
 
 pub fn fmt_thousands(n: i64) -> String {
-    let s = n.abs().to_string();
-    let mut out = String::with_capacity(s.len() + s.len() / 3);
-    for (i, ch) in s.chars().enumerate() {
-        if i > 0 && (s.len() - i) % 3 == 0 {
-            out.push(',');
-        }
-        out.push(ch);
-    }
-    if n < 0 {
-        format!("-{out}")
-    } else {
-        out
-    }
+    crate::stats::thousands(n)
 }
 
 pub async fn run(db: Db) {

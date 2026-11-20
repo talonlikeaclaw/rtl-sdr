@@ -34,166 +34,144 @@
       </div>
       <div class="hero-tools">
         {% include "partials/nav.html" %}
+        {% include "partials/status.html" %}
       </div>
     </header>
 
     <main id="main">
-      <section class="glass panel" aria-label="Rare catches">
-        <h2>Rare catches</h2>
-        <div class="cards records-cards">
-          <div class="card">
-            <div class="num">{{ records.one_hit_count }}</div>
-            <div class="sub">one-hit wonders</div>
-            <div class="who">aircraft heard on exactly one pass</div>
-          </div>
-        </div>
+      <section class="glass panel" aria-label="Record book">
+        <h2>Record book</h2>
         <div class="table-wrap">
-          <table>
-            <caption class="sr-only">Aircraft heard on exactly one continuous pass, most recent first</caption>
+          <table class="record-book">
+            <caption class="sr-only">All-time records: the value, the aircraft that holds it, and the day it was set</caption>
             <thead>
-              <tr><th scope="col">Hex</th><th scope="col">Identity</th><th scope="col">Type</th><th scope="col">Seen</th></tr>
+              <tr>
+                <th scope="col">Record</th>
+                <th scope="col">Value</th>
+                <th scope="col">Holder</th>
+                <th scope="col" class="col-secondary">Detail</th>
+              </tr>
             </thead>
             <tbody>
-              {% for r in records.one_hits %}
+              {% for r in records.headline %}
+              <tr>
+                <th scope="row" class="rec-label">{{ r.label }}{% if r.fresh %} <span class="rec-fresh">new</span>{% endif %}</th>
+                <td class="rec-value">{{ r.value }}{% if !r.unit.is_empty() %} <span class="unit">{{ r.unit }}</span>{% endif %}</td>
+                <td>
+                  <a href="{{ r.url }}">{{ r.holder }}</a>
+                  {% if let Some(t) = r.typecode.as_deref() %}<span class="mono">{% if let Some(u) = r.type_url.as_deref() %} <a href="{{ u }}">{{ t }}</a>{% else %} {{ t }}{% endif %}</span>{% endif %}
+                </td>
+                <td class="rec-note col-secondary">
+                  {% if !r.note.is_empty() %}{{ r.note }}{% if r.since.is_some() %} · {% endif %}{% endif %}
+                  {% if let Some(s) = r.since.as_deref() %}since {{ s }}{% endif %}
+                  {% if r.note.is_empty() && r.since.is_none() %}-{% endif %}
+                </td>
+              </tr>
+              {% endfor %}
+              {% if records.headline.is_empty() %}
+              <tr><td colspan="4" class="empty-row">No records yet. The poller fills this page as aircraft are heard.</td></tr>
+              {% endif %}
+            </tbody>
+          </table>
+        </div>
+        {% if records.fresh_count() > 0 %}
+        <p class="chart-note">A record set within the last 7 days is marked <span class="rec-fresh">new</span>.</p>
+        {% endif %}
+      </section>
+
+      <section class="glass panel" aria-label="The rare">
+        <h2>The rare</h2>
+
+        <h3 class="group-label">Rarest types</h3>
+        <div class="table-wrap">
+          <table>
+            <caption class="sr-only">Caught types ranked by the share of their OpenSky registry population heard</caption>
+            <thead>
+              <tr><th scope="col">Type</th><th scope="col" class="col-secondary">Name</th><th scope="col">Rarity</th></tr>
+            </thead>
+            <tbody>
+              {% for r in records.rarest_types %}
+              <tr>
+                <td class="mono"><a href="/type/{{ r.designator }}">{{ r.designator }}</a></td>
+                <td class="col-secondary">{{ r.name }}</td>
+                <td>{{ r.odds_str() }}</td>
+              </tr>
+              {% endfor %}
+              {% if records.rarest_types.is_empty() %}
+              <tr><td colspan="3" class="empty-row">No typed aircraft yet. The type dex fills in as aircraft arrive.</td></tr>
+              {% endif %}
+            </tbody>
+          </table>
+        </div>
+        <p class="chart-note">Rarity is airframes caught in the ledger against the type's OpenSky population.</p>
+
+        <h3 class="group-label">Oldest airframes</h3>
+        <div class="table-wrap">
+          <table>
+            <caption class="sr-only">Oldest airframes by year built</caption>
+            <thead>
+              <tr><th scope="col">Hex</th><th scope="col">Registration</th><th scope="col" class="col-secondary">Type</th><th scope="col">Built</th><th scope="col" class="col-secondary">Age</th></tr>
+            </thead>
+            <tbody>
+              {% for r in records.oldest %}
               <tr>
                 <td class="hex"><a href="/aircraft/{{ r.hex }}">{{ r.hex }}</a></td>
                 <td>{{ r.ident() }}</td>
-                <td class="mono">{% if let Some(u) = r.type_url() %}<a href="{{ u }}">{{ r.typecode.as_deref().unwrap_or("-") }}</a>{% else %}{{ r.typecode.as_deref().unwrap_or("-") }}{% endif %}</td>
-                <td>{{ r.last_seen_str() }}</td>
+                <td class="mono col-secondary">{% if let Some(u) = r.type_url() %}<a href="{{ u }}">{{ r.typecode.as_deref().unwrap_or("-") }}</a>{% else %}{{ r.typecode.as_deref().unwrap_or("-") }}{% endif %}</td>
+                <td>{{ r.year_str() }}</td>
+                <td class="col-secondary">{{ r.age }} yrs</td>
               </tr>
               {% endfor %}
-              {% if records.one_hits.is_empty() %}
-              <tr><td colspan="4" class="empty-row">No one-hit wonders yet. Every aircraft has been heard more than once.</td></tr>
+              {% if records.oldest.is_empty() %}
+              <tr><td colspan="5" class="empty-row">No build years in the enrichment data yet.</td></tr>
               {% endif %}
             </tbody>
           </table>
         </div>
       </section>
 
-      <section class="glass panel" aria-label="Longest overhead">
-        <h2>Longest overhead</h2>
+      <section class="glass panel" aria-label="The regulars">
+        <h2>The regulars</h2>
+
+        <h3 class="group-label">Longest overhead</h3>
         <div class="table-wrap">
           <table>
             <caption class="sr-only">Longest continuous visits</caption>
             <thead>
-              <tr><th scope="col">Hex</th><th scope="col">Registration</th><th scope="col">Type</th><th scope="col">Start</th><th scope="col">End</th><th scope="col">Duration</th><th scope="col">Polls</th></tr>
+              <tr><th scope="col">Hex</th><th scope="col">Registration</th><th scope="col" class="col-secondary">Type</th><th scope="col" class="col-secondary">Started</th><th scope="col">Duration</th></tr>
             </thead>
             <tbody>
               {% for v in records.longest_visits %}
               <tr>
                 <td class="hex"><a href="/aircraft/{{ v.hex }}">{{ v.hex }}</a></td>
                 <td>{{ v.ident() }}</td>
-                <td class="mono">{% if let Some(u) = v.type_url() %}<a href="{{ u }}">{{ v.typecode.as_deref().unwrap_or("-") }}</a>{% else %}{{ v.typecode.as_deref().unwrap_or("-") }}{% endif %}</td>
-                <td>{{ v.start_str() }}</td>
-                <td>{{ v.end_str() }}</td>
+                <td class="mono col-secondary">{% if let Some(u) = v.type_url() %}<a href="{{ u }}">{{ v.typecode.as_deref().unwrap_or("-") }}</a>{% else %}{{ v.typecode.as_deref().unwrap_or("-") }}{% endif %}</td>
+                <td class="col-secondary">{{ v.start_str() }}</td>
                 <td>{{ v.duration_str() }}</td>
-                <td>{{ v.polls }}</td>
               </tr>
               {% endfor %}
               {% if records.longest_visits.is_empty() %}
-              <tr><td colspan="7" class="empty-row">No visits recorded yet.</td></tr>
+              <tr><td colspan="5" class="empty-row">No visits recorded yet.</td></tr>
               {% endif %}
             </tbody>
           </table>
         </div>
-      </section>
+        <p class="chart-note">A visit is one continuous pass; a gap of 5 minutes starts a new one.</p>
 
-      <section class="glass panel" aria-label="Climb and descent">
-        <h2>Climb and descent</h2>
+        <h3 class="group-label">Busiest callsigns</h3>
         <div class="table-wrap">
           <table>
-            <caption class="sr-only">Steepest climbs</caption>
-            <thead><tr><th scope="col">Hex</th><th scope="col">Aircraft</th><th scope="col">Climb (ft/min)</th></tr></thead>
-            <tbody>
-              {% for r in records.steepest_climbs %}
-              <tr>
-                <td class="hex"><a href="/aircraft/{{ r.hex }}">{{ r.hex }}</a></td>
-                <td>{{ r.ident() }}</td>
-                <td>{{ r.value_str() }}</td>
-              </tr>
-              {% endfor %}
-              {% if records.steepest_climbs.is_empty() %}
-              <tr><td colspan="3" class="empty-row">No climb data yet.</td></tr>
-              {% endif %}
-            </tbody>
-          </table>
-        </div>
-        <div class="table-wrap">
-          <table>
-            <caption class="sr-only">Steepest descents</caption>
-            <thead><tr><th scope="col">Hex</th><th scope="col">Aircraft</th><th scope="col">Descent (ft/min)</th></tr></thead>
-            <tbody>
-              {% for r in records.steepest_descents %}
-              <tr>
-                <td class="hex"><a href="/aircraft/{{ r.hex }}">{{ r.hex }}</a></td>
-                <td>{{ r.ident() }}</td>
-                <td>{{ r.abs_value_str() }}</td>
-              </tr>
-              {% endfor %}
-              {% if records.steepest_descents.is_empty() %}
-              <tr><td colspan="3" class="empty-row">No descent data yet.</td></tr>
-              {% endif %}
-            </tbody>
-          </table>
-        </div>
-      </section>
-
-      <section class="glass panel" aria-label="Oldest airframes">
-        <h2>Oldest airframes</h2>
-        <div class="table-wrap">
-          <table>
-            <caption class="sr-only">Oldest airframes by year built</caption>
-            <thead><tr><th scope="col">Hex</th><th scope="col">Registration</th><th scope="col">Type</th><th scope="col">Built</th></tr></thead>
-            <tbody>
-              {% for r in records.oldest %}
-              <tr>
-                <td class="hex"><a href="/aircraft/{{ r.hex }}">{{ r.hex }}</a></td>
-                <td>{{ r.ident() }}</td>
-                <td class="mono">{% if let Some(u) = r.type_url() %}<a href="{{ u }}">{{ r.typecode.as_deref().unwrap_or("-") }}</a>{% else %}{{ r.typecode.as_deref().unwrap_or("-") }}{% endif %}</td>
-                <td>{{ r.year_str() }}</td>
-              </tr>
-              {% endfor %}
-              {% if records.oldest.is_empty() %}
-              <tr><td colspan="4" class="empty-row">No build years in the enrichment data yet.</td></tr>
-              {% endif %}
-            </tbody>
-          </table>
-        </div>
-      </section>
-
-      <section class="glass panel" aria-label="Rarest types">
-        <h2>Rarest types</h2>
-        <div class="table-wrap">
-          <table>
-            <caption class="sr-only">Caught types with the smallest share of the registry</caption>
-            <thead><tr><th scope="col">Type</th><th scope="col">Name</th><th scope="col">Caught</th><th scope="col">Registered</th><th scope="col">Share</th></tr></thead>
-            <tbody>
-              {% for r in records.rarest_types %}
-              <tr>
-                <td class="mono"><a href="/type/{{ r.designator }}">{{ r.designator }}</a></td>
-                <td>{{ r.name }}</td>
-                <td>{{ r.caught }}</td>
-                <td>{{ r.registered }}</td>
-                <td>{{ r.pct_str() }}</td>
-              </tr>
-              {% endfor %}
-              {% if records.rarest_types.is_empty() %}
-              <tr><td colspan="5" class="empty-row">No typed aircraft yet.</td></tr>
-              {% endif %}
-            </tbody>
-          </table>
-        </div>
-      </section>
-
-      <section class="glass panel" aria-label="Most-heard callsigns">
-        <h2>Most-heard callsigns</h2>
-        <div class="table-wrap">
-          <table>
-            <caption class="sr-only">Callsigns flown by the most distinct airframes</caption>
-            <thead><tr><th scope="col">Callsign</th><th scope="col">Airframes</th><th scope="col">Sightings</th></tr></thead>
+            <caption class="sr-only">Callsigns heard most often, by sighting count</caption>
+            <thead>
+              <tr><th scope="col">Callsign</th><th scope="col">Sightings</th><th scope="col">Airframes</th></tr>
+            </thead>
             <tbody>
               {% for c in records.top_callsigns %}
-              <tr><td class="mono">{{ c.callsign }}</td><td>{{ c.airframes }}</td><td>{{ c.sightings }}</td></tr>
+              <tr>
+                <td class="mono">{{ c.callsign }}</td>
+                <td>{{ c.sightings }}</td>
+                <td>{{ c.airframes }}</td>
+              </tr>
               {% endfor %}
               {% if records.top_callsigns.is_empty() %}
               <tr><td colspan="3" class="empty-row">No callsigns recorded yet.</td></tr>
@@ -201,6 +179,51 @@
             </tbody>
           </table>
         </div>
+        <p class="chart-note">Sightings counts every poll an airframe was overhead; Airframes counts the distinct aircraft that used the callsign.</p>
+      </section>
+
+      <section class="glass panel" aria-label="The long tail">
+        <h2>The long tail</h2>
+        <div class="card-group">
+          <div class="cards pair">
+            <div class="card">
+              <div class="num">{{ records.one_hit_count_str() }}</div>
+              <div class="sub">heard once</div>
+              <div class="who">{{ records.one_hit_share_str() }} of the {{ records.fleet_str() }} airframes in the ledger</div>
+            </div>
+            <div class="card">
+              <div class="num">{{ records.repeat_count_str() }}</div>
+              <div class="sub">heard again</div>
+              <div class="who">{{ records.repeat_visits_avg_str() }} visits each on average</div>
+            </div>
+          </div>
+        </div>
+
+        <h3 class="group-label">Most recently heard once</h3>
+        <div class="table-wrap">
+          <table>
+            <caption class="sr-only">Aircraft heard on exactly one continuous pass, most recent first</caption>
+            <thead>
+              <tr><th scope="col">Hex</th><th scope="col">Identity</th><th scope="col" class="col-secondary">Type</th><th scope="col">Last seen</th></tr>
+            </thead>
+            <tbody>
+              {% for r in records.one_hits %}
+              <tr>
+                <td class="hex"><a href="/aircraft/{{ r.hex }}">{{ r.hex }}</a></td>
+                <td>{{ r.ident() }}</td>
+                <td class="mono col-secondary">{% if let Some(u) = r.type_url() %}<a href="{{ u }}">{{ r.typecode.as_deref().unwrap_or("-") }}</a>{% else %}{{ r.typecode.as_deref().unwrap_or("-") }}{% endif %}</td>
+                <td>{{ r.last_seen_str() }}</td>
+              </tr>
+              {% endfor %}
+              {% if records.one_hits.is_empty() %}
+              <tr><td colspan="4" class="empty-row">Every aircraft has been heard on more than one pass.</td></tr>
+              {% endif %}
+            </tbody>
+          </table>
+        </div>
+        {% if records.one_hits_truncated() %}
+        <p class="chart-note">The {{ records.one_hits.len() }} most recently heard of {{ records.one_hit_count_str() }} one-pass airframes.</p>
+        {% endif %}
       </section>
     </main>
 

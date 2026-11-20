@@ -16,10 +16,10 @@ readsb and tar1090. The local and network pollers are the only writers.
 | `/aircraft/:hex` | Aircraft profile: identity/country, visits, schedule/streaks, callsigns, records, route, registration/type enrichment, emergency history, tar1090 map/trace links |
 | `/today`         | Daily digest: unique/new aircraft, hour histogram, records vs prior days                                               |
 | `/coverage`      | Receiver polar coverage plus local vs adsb.fi within 100 NM: overlap, only-you, missed                                  |
-| `/activity`      | 7×24 weekday/hour heatmap, range/messages/unique/new/network-coverage charts                                           |
+| `/activity`      | 7×24 weekday/hour heatmap, range/messages/unique/ledger-growth/network-coverage charts                                 |
 | `/types`         | Type dex: every ICAO type designator heard, with photo and catch stats                                                 |
 | `/type/:code`    | Type profile: ICAO Doc 8643 specs, Wikipedia extract/photo, Wikidata facts, airframes seen                             |
-| `/records`       | One-hit wonders, longest overhead passes, steepest climbs/descents, oldest airframes, rarest types, top callsigns      |
+| `/records`       | Record book (value, holder, date), rarest types, oldest airframes, longest visits, busiest callsigns, one-pass airframes |
 | `/countries`     | Every state of registry heard, ranked by airframes, with share, types, best range and last heard                       |
 
 tar1090 deep links (`?icao=<hex>`, `?showTrace=<hex>`) render only while an
@@ -38,7 +38,7 @@ All endpoints return JSON and are read-only.
 | `/api/today`                    | `{summary, hours, records, new}`                     |
 | `/api/coverage`                 | Local vs network live sets                           |
 | `/api/feed`                     | Feeder client, network API and snapshot status       |
-| `/api/activity`                 | Heatmap and range/messages/unique/new/coverage series |
+| `/api/activity`                 | Heatmap and range/messages/unique/growth/coverage series |
 | `/api/polar`                    | Receiver polar coverage by 10° sector                |
 | `/api/records`                  | Records and rarities                                 |
 | `/api/types`, `/api/type/:code` | Type dex and one designator                          |

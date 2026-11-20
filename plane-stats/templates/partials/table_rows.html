@@ -1,10 +1,2 @@
 {% for a in rows %}{% include "partials/table_row.html" %}{% endfor %}
-{% if rows.is_empty() %}
-<tr><td colspan="14" class="empty-row">
-  {% if filtered %}
-  No aircraft match these filters. <a href="/">Clear them</a> to see the whole fleet.
-  {% else %}
-  No aircraft recorded yet. The poller writes a row within 10&nbsp;s of the first aircraft it hears.
-  {% endif %}
-</td></tr>
-{% endif %}
+

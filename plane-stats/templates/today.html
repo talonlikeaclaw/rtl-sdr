@@ -34,6 +34,7 @@
       </div>
       <div class="hero-tools">
         {% include "partials/nav.html" %}
+        {% include "partials/status.html" %}
       </div>
     </header>
 
@@ -41,11 +42,11 @@
       <section class="glass panel" aria-label="At a glance">
         <h2>At a glance</h2>
         <div class="card-group">
-          <div class="cards">
+          <div class="cards five">
             <div class="card">
               <div class="num">{{ summary.unique }}</div>
               <div class="sub">unique aircraft</div>
-              <div class="who">{{ summary.sightings }} polls seen</div>
+              <div class="who">{{ summary.sightings_str() }} polls seen</div>
             </div>
             <div class="card">
               <div class="num">{{ summary.new }}</div>
@@ -55,10 +56,10 @@
             <div class="card">
               <div class="num">{% if let Some(v) = summary.peak_airborne %}{{ v }}{% else %}-{% endif %}</div>
               <div class="sub">peak overhead</div>
-              <div class="who">across {{ summary.polls }} poll cycles</div>
+              <div class="who">across {{ summary.polls_str() }} poll cycles</div>
             </div>
             <div class="card">
-              <div class="num">{{ summary.messages }}</div>
+              <div class="num">{{ summary.messages_str() }}</div>
               <div class="sub">messages</div>
               <div class="who">{% if summary.first_ts.is_some() %}{{ summary.span_str() }} local{% else %}no polls yet{% endif %}</div>
             </div>
@@ -87,15 +88,15 @@
           <table>
             <caption class="sr-only">Today's records against the best prior day</caption>
             <thead>
-              <tr><th scope="col">Metric</th><th scope="col">Today</th><th scope="col">Previous best</th><th scope="col">Aircraft</th><th scope="col">Status</th></tr>
+              <tr><th scope="col">Metric</th><th scope="col">Today</th><th scope="col" class="col-secondary">Previous best</th><th scope="col" class="col-secondary">Aircraft</th><th scope="col">Status</th></tr>
             </thead>
             <tbody>
               {% for r in records %}
               <tr>
                 <td>{{ r.metric }}</td>
                 <td>{{ r.today_str() }} {{ r.unit }}</td>
-                <td>{% if r.prior.is_some() %}{{ r.prior_str() }} {{ r.unit }}{% else %}-{% endif %}</td>
-                <td><a href="/aircraft/{{ r.hex }}">{{ r.ident }}</a></td>
+                <td class="col-secondary">{% if r.prior.is_some() %}{{ r.prior_str() }} {{ r.unit }}{% else %}-{% endif %}</td>
+                <td class="col-secondary"><a href="/aircraft/{{ r.hex }}">{{ r.ident }}</a></td>
                 <td>{% if r.improved %}<span class="record-up">new record</span>{% else %}<span class="muted">held</span>{% endif %}</td>
               </tr>
               {% endfor %}
@@ -130,6 +131,23 @@
             {% for h in hours %}<span>{% if h.show_label() %}{{ h.label() }}{% endif %}</span>{% endfor %}
           </div>
         </div>
+        {# Every chart ships its data as a table: the exact value, the touch
+           path where a 9px column cannot be tapped, and the screen reader's
+           route. The histogram was the one chart on the site without it. #}
+        <details class="chart-table">
+          <summary>Show as table</summary>
+          <div class="table-wrap">
+            <table>
+              <caption class="sr-only">Peak aircraft overhead per local hour today</caption>
+              <thead><tr><th scope="col">Hour</th><th scope="col">Aircraft</th></tr></thead>
+              <tbody>
+                {% for h in hours %}
+                <tr><td>{{ h.label() }}:00</td><td>{{ h.count }}</td></tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
+        </details>
       </section>
 
       <section class="glass panel" aria-label="New today">
@@ -138,7 +156,7 @@
           <table>
             <caption class="sr-only">Aircraft heard for the first time today</caption>
             <thead>
-              <tr><th scope="col">Hex</th><th scope="col">Callsign</th><th scope="col">Registration</th><th scope="col">Type</th><th scope="col">First seen</th></tr>
+              <tr><th scope="col">Hex</th><th scope="col">Callsign</th><th scope="col">Registration</th><th scope="col">Type</th><th scope="col" class="col-secondary">First seen</th></tr>
             </thead>
             <tbody>
               {% for a in new %}
@@ -147,7 +165,7 @@
                 <td>{% if let Some(v) = a.last_flight %}{{ v }}{% else %}-{% endif %}</td>
                 <td>{% if let Some(v) = a.registration %}{{ v }}{% else %}-{% endif %}</td>
                 <td>{% if let Some(u) = a.type_url() %}<a href="{{ u }}" class="mono">{{ a.type_code() }}</a>{% else %}{{ a.type_code() }}{% endif %}</td>
-                <td>{{ a.first_seen_str() }}</td>
+                <td class="col-secondary">{{ a.first_seen_str() }}</td>
               </tr>
               {% endfor %}
               {% if new.is_empty() %}
