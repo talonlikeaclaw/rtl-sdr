@@ -1087,6 +1087,9 @@ impl Record {
         }
     }
     pub fn label_day(&self) -> String {
+        if let Ok(d) = chrono::NaiveDate::parse_from_str(&self.hex, "%Y-%m-%d") {
+            return d.format("%b %d").to_string();
+        }
         match self.hex.parse::<i64>() {
             Ok(d) => chrono::DateTime::from_timestamp(d, 0).expect("valid ts").with_timezone(&chrono::Local)
                 .format("%b %d")
@@ -2682,7 +2685,7 @@ pub struct Stats {
     pub top_type: Option<Record>, // value = aircraft count, hex = typecode
     pub top_operator: Option<Record>, // value = distinct airframes, hex = operator name
     pub top_airframe: Option<Record>, // value = polls seen, hex = aircraft hex
-    pub busiest_day: Option<Record>,  // value = peak aircraft count, hex = day label
+    pub busiest_day: Option<Record>,  // value = distinct airframes that day, hex = day
     /// Distinct states of registry in the ledger.
     pub countries: i64,
     pub top_country: Option<CountryCount>,
@@ -2873,12 +2876,13 @@ pub fn stats(db: &Db, now: f64) -> rusqlite::Result<Stats> {
         )
         .optional()?;
 
+    // Distinct airframes heard that local day, not the day's peak hourly
+    // count: `MAX(max_count)` would repeat the busiest-hour card's number.
     let busiest_day: Option<Record> = conn
         .query_row(
-            "SELECT CAST(CAST((ts + ?1) / 86400 AS INTEGER) * 86400 - ?1 AS INTEGER), MAX(max_count)
-             FROM poll_hour GROUP BY 1 ORDER BY 2 DESC LIMIT 1",
-            params![tz_offset],
-            |r| Ok(Record { hex: r.get::<_, i64>(0)?.to_string(), value: r.get(1)?, ..Default::default() }),
+            "SELECT day, COUNT(*) FROM day_aircraft GROUP BY day ORDER BY 2 DESC, 1 LIMIT 1",
+            [],
+            |r| Ok(Record { hex: r.get(0)?, value: r.get(1)?, ..Default::default() }),
         )
         .optional()?;
 
